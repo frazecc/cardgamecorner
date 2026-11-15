@@ -1,0 +1,89 @@
+name: Buylist CardGameCorner in Supabase
+
+on:
+  schedule:
+    - cron: '17 6 * * 1,4'
+      timezone: Europe/Rome
+  workflow_dispatch:
+    inputs:
+      publish_only:
+        description: 'Importa un checkpoint completo gia raccolto, senza nuovo scraping'
+        type: boolean
+        default: false
+      source_run_id:
+        description: 'Con publish_only: run contenente il checkpoint completo'
+        type: string
+        default: '43749325476'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: cardgamecorner-supabase
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      SUPABASE_URL: https://uzvvzuoorpdivanwbsen.supabase.co
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Installa dipendenze
+        run: python -m pip install -r requirements.txt
+      - name: Verifica codice e configurazione
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PUBLISH_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_only }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          python -m unittest discover -s tests -q
+          python -c 'import os; from supabase_sync import SupabaseClient; SupabaseClient(os.environ["SUPABASE_URL"], os.environ.get("SUPABASE_SERVICE_ROLE_KEY", ""))'
+          if [[ "$PUBLISH_ONLY" == 'true' && ! "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo 'Indica il run contenente il checkpoint completo.'
+            exit 1
+          fi
+      - name: Recupera checkpoint completo
+        if: inputs.publish_only
+        uses: actions/download-artifact@v4
+        with:
+          name: Buylist-Pokemon-Diagnostica
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.source_run_id }}
+          path: dati
+      - name: Normalizza percorso checkpoint
+        if: inputs.publish_only
+        run: python -c 'import shutil; shutil.copyfile("dati/CardGameCorner_Buylist_Pokemon_Completa.checkpoint.jsonl", "CardGameCorner_Buylist_Pokemon_Completa.checkpoint.jsonl")'
+      - name: Installa Chromium
+        if: ${{ !inputs.publish_only }}
+        run: python -m playwright install --with-deps chromium
+      - name: Raccogli una nuova buylist
+        if: ${{ !inputs.publish_only }}
+        run: python -u scraper.py 2>&1 | tee scrape.log
+      - name: Importa e verifica Supabase
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PUBLISH_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_only }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          if [[ "$PUBLISH_ONLY" == 'true' ]]; then
+            python -u supabase_sync.py --source-run-id "$SOURCE_RUN_ID" 2>&1 | tee supabase.log
+          else
+            python -u supabase_sync.py 2>&1 | tee supabase.log
+          fi
+      - name: Conserva checkpoint e risultati
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Buylist-Pokemon-Diagnostica
+          path: |
+            *.xlsx
+            *.checkpoint.jsonl
+            *.log
+          retention-days: 30
+          if-no-files-found: warn
