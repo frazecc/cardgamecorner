@@ -1,4 +1,4 @@
-# CardGameCorner Buylist Pokémon — versione 5.0.0
+# CardGameCorner Buylist Pokémon — versione 5.0.1
 
 Aggiorna scraper.py, sheets_sync.py, requirements.txt, tests/ e
 .github/workflows/scrape.yml mantenendo i percorsi e avvia un NUOVO Run workflow.
@@ -6,8 +6,9 @@ Non usare Re-run jobs di un vecchio commit.
 
 ## Google Sheets e prestazioni
 
-Leggi GOOGLE_SHEETS.md per collegare il tuo foglio esistente: due Secrets GitHub
-consentono l'importazione automatica al termine della scansione. Quattro schede
+IMPORT CGC è già selezionato con l'ID fornito. Leggi GOOGLE_SHEETS.md per
+aggiungere il solo Secret GOOGLE_SERVICE_ACCOUNT_JSON e condividere il documento
+con il relativo account di servizio: l'importazione sarà automatica al termine della scansione. Quattro schede
 CGC_ ricevono dati verificati in blocchi, senza modificare le altre schede.
 Un Excel parziale non sostituisce il risultato completo nel documento.
 
@@ -73,7 +74,7 @@ una nuova esecuzione riparte dall'inizio.
   i prezzi buylist e i crediti delle 11.519 varianti, senza differenze.
 - Confronto sul sito: Charizard, Italiano, Excellent, First Edition mostra
   BuyList 1879.95 e Credit 2519.95, come nei dati Variants.
-- La scansione completa di tutte le espansioni con la versione 5.0.0 deve ancora
+- La scansione completa di tutte le espansioni con la versione 5.0.1 deve ancora
   terminare su GitHub Actions. I numeri sopra si riferiscono al parziale reale.
 
 Per ripetere i test dalla radice del pacchetto:

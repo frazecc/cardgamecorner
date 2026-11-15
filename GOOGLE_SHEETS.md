@@ -6,7 +6,13 @@ automaticamente i dati nel tuo documento Google Sheets.
 
 La connessione di Google Drive a ChatGPT non è necessaria per questa modalità:
 lo script in GitHub Actions si autentica direttamente alla Google Sheets API.
-Serve una configurazione iniziale nel tuo account Google Cloud e nel repository.
+Il documento IMPORT CGC è già impostato come destinazione:
+
+    1SH8_HmCd5YV37woGIZUwemy_GLh6Y9Z_28OQf_B_Rlw
+
+Il link è stato aperto e il titolo verificato nel browser. Questo non verifica
+l'accesso del futuro account di servizio: servono ancora credenziali e condivisione.
+La configurazione iniziale rimane necessaria nel tuo account Google Cloud e nel repository.
 
 ## Configurazione una tantum
 
@@ -22,12 +28,15 @@ Serve una configurazione iniziale nel tuo account Google Cloud e nel repository.
    Condividi, aggiungi quell'indirizzo come Editor e disattiva la notifica.
    Il foglio non deve essere pubblico. Il link da solo non concede accesso.
 6. Nel repository GitHub apri Settings > Secrets and variables > Actions >
-   New repository secret e crea queste DUE voci:
+   New repository secret e crea questa voce:
 
 | Nome Secret | Contenuto |
 | --- | --- |
-| GOOGLE_SHEET_ID | Il link del Google Sheet oppure l'ID tra /d/ e /edit |
 | GOOGLE_SERVICE_ACCOUNT_JSON | Tutto il contenuto del JSON scaricato al punto 4 |
+
+GOOGLE_SHEET_ID non serve per IMPORT CGC: il suo ID è già configurato.
+Se in futuro vuoi usare un altro documento, puoi aggiungere il Secret opzionale
+GOOGLE_SHEET_ID con il suo URL/ID: questo prevale sulla destinazione preconfigurata.
 
 Il JSON contiene una chiave privata: inseriscilo solo nel Secret, senza caricarlo
 nel repository pubblico o incollarlo nella chat. Non serve inviarlo a me.
@@ -42,9 +51,9 @@ Il workflow controlla subito che le credenziali permettano di leggere il documen
 prima della lunga scansione. La prova iniziale è di lettura; al service account
 va assegnato il ruolo Editor al punto 5 per consentire la scrittura finale.
 
-Se entrambi i Secrets sono assenti lo scraper produce soltanto Excel. Se ne è
-impostato solo uno, il controllo si interrompe invece di saltare silenziosamente
-l'importazione richiesta.
+Con questa configurazione l'importazione Google è attiva nel workflow. Se le
+credenziali non sono configurate, il controllo iniziale si ferma prima della lunga
+scansione. Per produrre soltanto Excel in locale usa python scraper.py.
 
 ## Come viene aggiornato il documento
 
@@ -95,8 +104,8 @@ ed essere completo, con tutti i conteggi coerenti.
     python -m playwright install chromium
     python scraper.py
 
-Imposta GOOGLE_SHEET_ID e GOOGLE_APPLICATION_CREDENTIALS (percorso al JSON)
-nel tuo ambiente, poi esegui:
+Imposta GOOGLE_APPLICATION_CREDENTIALS (percorso al JSON) nel tuo ambiente,
+poi esegui (IMPORT CGC è già selezionato):
 
     python sheets_sync.py --check
     python sheets_sync.py
@@ -120,7 +129,7 @@ errore e alla fine. Per scaricare anche le immagini usa --load-images.
 
 Non è promesso un fattore di accelerazione: i tempi effettivi dipendono dal sito
 ed è ancora necessaria una scansione completa della nuova versione sul runner.
-L'importazione reale nel tuo Google Sheet resta da attivare con i due Secrets.
+L'importazione reale nel tuo Google Sheet resta da attivare con il Secret delle credenziali e la condivisione con il service account.
 I test del trasferimento usano un modello API e non credenziali del tuo account.
 
 ## Fonti tecniche

@@ -1,7 +1,7 @@
 """Importa un Excel COMPLETO dello scraper in un Google Sheet esistente.
 
 pip install 'google-auth[requests]>=2.38,<3' openpyxl
-GOOGLE_SHEET_ID: ID o URL del documento.
+Destinazione preconfigurata: IMPORT CGC. GOOGLE_SHEET_ID può cambiarla.
 GOOGLE_SERVICE_ACCOUNT_JSON: JSON del service account, salvato nei Secrets GitHub.
 In alternativa usa GOOGLE_APPLICATION_CREDENTIALS per un file locale o ADC.
 Non serve Google Drive API: basta Sheets API e condividere il documento come Editor.
@@ -23,6 +23,7 @@ from urllib.parse import quote
 from openpyxl import load_workbook
 
 SOURCE_URL = 'https://www.cardgamecorner.com/it/buylist-2026?game=pokemon'
+DEFAULT_SPREADSHEET_ID = '1SH8_HmCd5YV37woGIZUwemy_GLh6Y9Z_28OQf_B_Rlw'
 SCOPE = 'https://www.googleapis.com/auth/spreadsheets'
 TABLES = ('Prezzi', 'Carte', 'Info', 'Espansioni')
 OWNER_KEY = 'cgc_export'
@@ -349,7 +350,7 @@ def authenticated_session():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--input', default='CardGameCorner_Buylist_Pokemon_Completa.xlsx')
-    parser.add_argument('--spreadsheet-id', default=os.environ.get('GOOGLE_SHEET_ID', ''))
+    parser.add_argument('--spreadsheet-id', default=os.environ.get('GOOGLE_SHEET_ID', '').strip() or DEFAULT_SPREADSHEET_ID)
     parser.add_argument('--check', action='store_true', help='Verifica credenziali e accesso, senza modificare il foglio')
     args = parser.parse_args()
     try:
