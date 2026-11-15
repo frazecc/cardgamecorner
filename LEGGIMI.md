@@ -1,4 +1,4 @@
-# CardGameCorner Buylist Pokémon — versione 3.0.0
+# CardGameCorner Buylist Pokémon — versione 3.1.0
 
 Sostituisci nel repository i due file contenuti nello ZIP, mantenendo i percorsi:
 - scraper.py
@@ -49,7 +49,7 @@ un checkpoint diagnostico: la ripresa automatica non è implementata.
 - Generazione e riapertura Excel con rapporto di copertura verificate.
 - Sul sito è stata verificata la paginazione e l'insufficienza della ricerca
   generale confrontandola con l'espansione Base.
-- La scansione completa di tutte le espansioni della versione 3 deve ancora
+- La scansione completa di tutte le espansioni della versione 3.1 deve ancora
   essere eseguita. Non è stato verificato un conteggio finale completo.
 
 ## Uso locale
@@ -62,3 +62,27 @@ Per vedere il browser: python scraper.py --headed
 Per aumentare il timeout per pagina: python scraper.py --timeout 180
 
 Non viene effettuato login e non vengono aggiunti prodotti al carrello.
+
+## Correzioni della versione 3.1.0
+
+L'esecuzione GitHub 43708073186 si interrompeva con "Nessuna espansione
+disponibile". La versione 3.0 leggeva le opzioni dal select HTML dopo che la
+ricerca aveva chiuso il pannello Filtri. La 3.1 legge Filters.Expansions dai dati
+Angular già caricati, attende che l'elenco sia disponibile e riapre il pannello
+prima di selezionare ogni espansione. Usa i valori reali delle opzioni, anche
+quando Angular li codifica come stringhe invece che numeri.
+
+Corrette anche l'attesa dei risultati vuoti (ora devono stabilizzarsi), la
+stabilità del caricamento (si azzera se riprendono richieste), e l'attesa di
+ricerche diverse con risultati identici (non causa più un timeout ingiustificato).
+Il salvataggio di un parziale non nasconde l'errore originale in caso di guasto
+alla scrittura Excel. La diagnostica include lo stato letto dalla pagina.
+
+Sono passati 7 test automatici di regressione. È stata inoltre verificata con
+un modello DOM senza select la lettura degli ID numerici e stringa.
+Per ripetere i test: python -m unittest discover -s tests -v
+
+Per aggiornare la versione 3.0 basta sostituire scraper.py con quello di questo
+ZIP; il workflow è invariato. I test sono facoltativi per l'esecuzione.
+Questi controlli non sostituiscono una scansione completa sul sito: il totale
+finale di carte e la conclusione della scansione 3.1 restano da verificare.

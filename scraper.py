@@ -23,7 +23,7 @@ from playwright.sync_api import sync_playwright
 
 URL = "https://www.cardgamecorner.com/it/buylist-2026?game=pokemon"
 OUTPUT = "CardGameCorner_Buylist_Pokemon_Completa.xlsx"
-VERSION = "3.0.0"
+VERSION = "3.1.0"
 MORE = 'button[ng-click="showMore()"]'
 PRODUCT = '[ng-repeat="product in expansion.Products"]'
 
@@ -79,8 +79,10 @@ READ_STATE = r"""() => {
     return {
         page: Number(scope.PageNumber), pages: Number(scope.PageCount), pending,
         no_results: document.body.innerText.includes('Nessun prodotto corrisponde alla tua ricerca.'),
-        editions: [...(document.querySelector('select[ng-options="exp.Id as exp.Espansione for exp in Filters.Expansions"]')?.options || [])]
-            .filter(o=>o.value.startsWith('number:')).map(o=>({id:Number(o.value.split(':')[1]), value:o.value, name:o.textContent.trim()})),
+        // SearchMobile chiude i filtri e può rimuovere i select dal DOM.
+        // L'elenco dei dati resta nello scope anche a pannello chiuso.
+        editions: (scope.Filters?.Expansions || []).filter(exp=>exp.Id != null)
+            .map(exp=>({id:exp.Id, name:exp.Espansione})),
         only_hot: scope.OnlyBuyList,
         filters: clean(scope.SelectedFilters || {}), rows,
         more: [...document.querySelectorAll('button[ng-click="showMore()"]')]
@@ -107,7 +109,7 @@ def fingerprint(state):
     return tuple(product_key(row) for row in state['rows'])
 
 
-def wait_ready(page, timeout, previous=None, expected_page=None, edition=None):
+def wait_ready(page, timeout, previous=None, expected_page=None, edition=None, require_editions=False):
     deadline = time.monotonic() + timeout
     stable = None
     since = None
@@ -116,8 +118,22 @@ def wait_ready(page, timeout, previous=None, expected_page=None, edition=None):
         state = page.evaluate(READ_STATE)
         current_edition = (state or {}).get('filters', {}).get('edition')
         edition_ok = str(current_edition or '') == str(edition or '')
-        if state and state['pending'] == 0 and edition_ok and state['no_results'] and not state['rows']:
-            return state
+        if not state or (require_editions and not state['editions']):
+            stable, since = None, None
+            page.wait_for_timeout(250)
+            continue
+        if state['pending'] != 0 or not edition_ok:
+            stable, since = None, None
+            page.wait_for_timeout(250)
+            continue
+        if state['no_results'] and not state['rows']:
+            marker = ('empty', str(edition), state['page'], state['pages'])
+            if marker != stable:
+                stable, since = marker, time.monotonic()
+            elif time.monotonic() - since >= 1.0:
+                return state
+            page.wait_for_timeout(250)
+            continue
         if state and state['rows'] and state['pending'] == 0 and edition_ok:
             if state['pages'] < 1 or state['page'] < 1:
                 page.wait_for_timeout(250)
@@ -236,12 +252,12 @@ def scrape(output, timeout=120, headed=False):
             page.locator('#simplesearch').fill('')
             page.locator('select[ng-model="OnlyBuyList"]').select_option(label='Tutto')
             page.locator('#button-search').click()
-            state = wait_ready(page, timeout, expected_page=1)
+            state = wait_ready(page, timeout, expected_page=1, require_editions=True)
             editions = state['editions']
             if not editions:
                 raise RuntimeError('Nessuna espansione disponibile: non posso certificare la copertura.')
             queries = [{'id': None, 'name': 'Ricerca generale'}] + editions
-            edition_selector = page.locator('select[ng-options="exp.Id as exp.Espansione for exp in Filters.Expansions"]')
+            edition_selector = page.locator('select[ng-options*="Filters.Expansions"]')
             with checkpoint.open('w', encoding='utf-8') as journal:
                 journal.write(json.dumps({'version': VERSION, 'url': URL, 'ricerche': queries}, ensure_ascii=False) + '\n')
                 for query_index, query in enumerate(queries):
@@ -251,10 +267,25 @@ def scrape(output, timeout=120, headed=False):
                     queries_log.append(query_log)
                     print(f"Ricerca {query_index + 1}/{len(queries)}: {query['name']}", flush=True)
                     if edition is not None:
-                        previous = fingerprint(state)
-                        edition_selector.select_option(value=query['value'])
+                        # La ricerca chiude i filtri: riaprirli quando serve.
+                        if not edition_selector.is_visible():
+                            page.locator('#btn-filters').click()
+                        edition_selector.wait_for(state='visible', timeout=timeout * 1000)
+                        # Angular può codificare lo stesso ID come number:123,
+                        # string:123 o valore semplice. Usare il valore reale.
+                        option_value = edition_selector.evaluate("""(el, id) => {
+                            const matches = [...el.options].filter(o => {
+                                const value = o.value.replace(/^(number|string):/, '');
+                                return value === String(id);
+                            });
+                            if (matches.length !== 1) throw Error('Espansione non selezionabile: ' + id);
+                            return matches[0].value;
+                        }""", edition)
+                        edition_selector.select_option(value=option_value)
                         page.locator('#button-search').click()
-                        state = wait_ready(page, timeout, previous, 1, edition)
+                        # Ricerche diverse possono avere risultati identici:
+                        # il fingerprint è necessario solo nella paginazione.
+                        state = wait_ready(page, timeout, expected_page=1, edition=edition)
                     validate_state(state, edition)
                     query_seen = set()
                     expected_page = 1
@@ -323,11 +354,18 @@ def scrape(output, timeout=120, headed=False):
             print(f'ESTRAZIONE COMPLETATA: {len(records)} carte, {len(log)} pagine, {len(editions)} espansioni. File: {output}', flush=True)
         except Exception as exc:
             if records:
-                save_excel(partial, records, log, False, str(exc), queries_log)
-                print(f'SALVATO SOLO IL PARZIALE: {partial}', file=sys.stderr, flush=True)
+                try:
+                    save_excel(partial, records, log, False, str(exc), queries_log)
+                    print(f'SALVATO SOLO IL PARZIALE: {partial}', file=sys.stderr, flush=True)
+                except Exception as save_error:
+                    print(f'Errore salvando Excel parziale: {save_error}. Conservato il giornale JSONL.', file=sys.stderr, flush=True)
             diagnostic = {'version': VERSION, 'url': URL, 'error': str(exc),
                           'cards': len(records), 'queries': queries_log,
                           'timestamp_utc': datetime.now(timezone.utc).isoformat()}
+            try:
+                diagnostic['page_state'] = page.evaluate(READ_STATE)
+            except Exception as read_error:
+                diagnostic['state_error'] = str(read_error)
             output.with_suffix('.errore.json').write_text(json.dumps(diagnostic, ensure_ascii=False, indent=2), encoding='utf-8')
             try:
                 page.screenshot(path=str(output.with_suffix('.errore.png')), full_page=False)
