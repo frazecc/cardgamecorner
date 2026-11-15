@@ -4,8 +4,8 @@ from playwright.sync_api import sync_playwright
 
 URL = "https://www.cardgamecorner.com/it/buylist-2026?game=pokemon"
 
-def scrape_buylist():
-    cards = []
+def scrape_all_pokemon_buylist():
+    all_cards = []
     seen = set()
 
     with sync_playwright() as p:
@@ -26,112 +26,83 @@ def scrape_buylist():
             except Exception:
                 pass
 
-        # Clicca sul filtro "Tutto" se presente per sbloccare l'intero catalogo
-        try:
-            tutto_btn = page.locator("text=Tutto").first
-            if tutto_btn.is_visible():
-                tutto_btn.click()
-                time.sleep(3)
-        except Exception:
-            pass
-
-        # Scorre la pagina ripetutamente per caricare tutto il catalogo dinamico
+        # Scorre la pagina ripetutamente per caricare tutto il catalogo dinamico (infinite scroll)
         last_height = page.evaluate("document.body.scrollHeight")
-        scroll_attempts = 0
-        while scroll_attempts < 150:
+        for i in range(250):
             page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            time.sleep(2.5)
-
-            # Clicca su eventuali pulsanti "Carica altro"
+            time.sleep(1.5)
+            
+            # Clicca eventuali pulsanti "Carica altro" o "Successiva"
             for btn_selector in ["button:has-text('Carica')", "a:has-text('Successiva')", ".load-more", ".pagination .next"]:
                 try:
                     btn = page.locator(btn_selector).first
                     if btn.is_visible():
                         btn.click()
-                        time.sleep(2)
+                        time.sleep(1.5)
                 except Exception:
                     pass
 
             new_height = page.evaluate("document.body.scrollHeight")
-            if new_height == last_height:
-                # Prova un secondo scroll di sicurezza
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight - 500)")
-                time.sleep(1.5)
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                time.sleep(2)
-                new_height_check = page.evaluate("document.body.scrollHeight")
-                if new_height_check == last_height:
-                    break
-            last_height = new_height_check if 'new_height_check' in locals() else new_height
-            scroll_attempts += 1
-            print(f"Scorrimento n. {scroll_attempts} completato...")
+            if new_height == last_height and i > 15:
+                break
+            last_height = new_height
 
-        # Estrazione mirata dei box prodotto
-        extracted_items = page.evaluate("""() => {
+        # Estrazione di tutti i blocchi carta dal DOM
+        cards_raw = page.evaluate("""() => {
             const results = [];
-            // Cerca tutti i contenitori tipici di card/prodotti nel sito
-            const items = document.querySelectorAll('.product-item, .card-item, div[class*="card"], div[class*="product"], li[class*="item"]');
-            
-            items.forEach(el => {
+            const elements = document.querySelectorAll('div, li, tr');
+            elements.forEach(el => {
                 const text = el.innerText || '';
-                if (text.includes('€')) {
-                    results.push(text);
+                if (text.includes('€') && text.length < 350 && el.children.length >= 1) {
+                    const lines = text.split('\\n').map(l => l.trim()).filter(l => l.length > 0);
+                    const priceLine = lines.find(l => l.includes('€'));
+                    if (priceLine && lines.length >= 2) {
+                        results.push({
+                            fullText: lines.join(' | '),
+                            price: priceLine
+                        });
+                    }
                 }
             });
-            
-            // Fallback se i selettori specifici non bastano: analizza tutti i blocchi con prezzo
-            if (results.length < 10) {
-                const allDivs = document.querySelectorAll('div');
-                allDivs.forEach(el => {
-                    const t = el.innerText || '';
-                    if (t.includes('€') && t.length < 400 && el.children.length >= 2) {
-                        results.push(t);
-                    }
-                });
-            }
             return results;
         }""")
 
-        print(f"Trovati {len(extracted_items)} elementi grezzi. Elaborazione in corso...")
+        print(f"Estratti {len(cards_raw)} elementi grezzi. Pulizia dati in corso...")
 
-        for item in extracted_items:
-            # Pulisce e formatta le righe
-            lines = [l.strip() for l in item.split('\n') if l.strip()]
-            price_line = next((l for l in lines if '€' in l), None)
+        for item in cards_raw:
+            full = item["fullText"]
+            price = item["price"]
             
-            if price_line and len(lines) >= 2:
-                # Esclude menu e voci di navigazione
-                if any(kw in item for kw in ["Vedi carrello", "Login", "Filtri", "Privacy", "Cookie"]):
-                    continue
-                
-                # Identifica il nome della carta (di solito penultima o terzultima riga prima del prezzo)
-                clean_lines = [l for l in lines if l not in ['Italiano', 'English', 'Spanish', 'Near Mint', 'Excellent', 'Heavily Played', 'Poor/Damaged', 'Reverse', 'First Edition', 'IT', 'EN', 'ES', 'NM/M', 'SP', 'HP', 'D'] and '€' not in l]
-                
-                if len(clean_lines) >= 2:
-                    carta = clean_lines[-1]
-                    espansione = clean_lines[-2]
-                elif len(clean_lines) == 1:
-                    carta = clean_lines[0]
-                    espansione = "Catalogo Generale"
-                else:
-                    continue
+            # Esclude menu e voci di navigazione
+            if any(skip in full for skip in ["Vedi carrello", "Login", "Filtri", "Privacy", "Cookie", "Cerca"]):
+                continue
 
-                # Pulisce il prezzo lasciando solo il numero/valuta
-                row_key = f"{carta}|{espansione}|{price_line}"
-                if row_key not in seen:
-                    seen.add(row_key)
-                    cards.append({
-                        "Carta": carta,
-                        "Espansione": espansione,
-                        "Prezzo Buylist": price_line
-                    })
+            parts = [p.strip() for p in full.split('|') if p.strip()]
+            clean_parts = [p for p in parts if p not in ['Italiano', 'English', 'Spanish', 'Near Mint', 'Excellent', 'Heavily Played', 'Poor/Damaged', 'Reverse', 'First Edition', 'IT', 'EN', 'ES', 'NM/M', 'SP', 'HP', 'D', price]]
+
+            if len(clean_parts) >= 2:
+                carta = clean_parts[-1]
+                espansione = clean_parts[-2]
+            elif len(clean_parts) == 1:
+                carta = clean_parts[0]
+                espansione = "Varie / Promo"
+            else:
+                continue
+
+            unique_key = f"{carta}---{espansione}---{price}"
+            if unique_key not in seen:
+                seen.add(unique_key)
+                all_cards.append({
+                    "Carta": carta,
+                    "Espansione": espansione,
+                    "Prezzo Buylist": price
+                })
 
         browser.close()
 
-    df = pd.DataFrame(cards)
-    output_file = "CardGameCorner_Buylist_Completa.xlsx"
-    df.to_excel(output_file, index=False)
-    print(f"Fatto! Estratte con successo {len(df)} carte uniche salvate in {output_file}")
+    df = pd.DataFrame(all_cards)
+    df.to_excel("CardGameCorner_Buylist_Pokemon_Completa.xlsx", index=False)
+    print(f"Fatto! Salvate {len(df)} carte nel file Excel.")
 
 if __name__ == "__main__":
-    scrape_buylist()
+    scrape_all_pokemon_buylist()
