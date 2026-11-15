@@ -4,13 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       publish_only:
-        description: 'Importa in Sheets un Excel completo già prodotto, senza ripetere lo scraping'
+        description: 'Importa in Sheets un Excel già prodotto, senza ripetere lo scraping'
         type: boolean
         default: false
       source_run_id:
-        description: 'Solo con publish_only: ID del run che contiene Buylist-Pokemon-Excel'
+        description: 'Solo con publish_only: ID del run con Excel o Diagnostica'
         type: string
         required: false
+      partial_data:
+        description: 'Solo con publish_only: importa il PARZIALE nelle schede CGC_PARZIALE_'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -60,16 +64,16 @@ jobs:
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
         run: |
           if [[ ! "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]]; then
-            echo 'Indica source_run_id: ID del run con un Excel completo.'
+            echo 'Indica source_run_id: ID del run con i dati Excel da recuperare.'
             exit 1
           fi
 
-      - name: Recupera Excel completo precedente
+      - name: Recupera dati Excel precedenti
         id: download
         if: inputs.publish_only
         uses: actions/download-artifact@v4
         with:
-          name: Buylist-Pokemon-Excel
+          name: ${{ inputs.partial_data && 'Buylist-Pokemon-Diagnostica' || 'Buylist-Pokemon-Excel' }}
           github-token: ${{ github.token }}
           run-id: ${{ inputs.source_run_id }}
           path: .
@@ -90,11 +94,29 @@ jobs:
         if: env.GOOGLE_SHEET_ID != ''
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          USE_PARTIAL: ${{ inputs.publish_only && inputs.partial_data }}
         shell: bash
-        run: python -u sheets_sync.py 2>&1 | tee sheets.log
+        run: |
+          if [[ "$USE_PARTIAL" == 'true' ]]; then
+            python -u sheets_sync.py --partial --input CardGameCorner_Buylist_Pokemon_PARZIALE.xlsx 2>&1 | tee sheets.log
+          else
+            python -u sheets_sync.py 2>&1 | tee sheets.log
+          fi
+
+      - name: Importa i dati parziali se lo scraper si interrompe
+        if: always() && steps.scrape.outcome == 'failure' && env.GOOGLE_SHEET_ID != ''
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        shell: bash
+        run: |
+          if [[ -f CardGameCorner_Buylist_Pokemon_PARZIALE.xlsx ]]; then
+            python -u sheets_sync.py --partial --input CardGameCorner_Buylist_Pokemon_PARZIALE.xlsx 2>&1 | tee sheets_partial.log
+          else
+            echo 'Lo scraper non ha prodotto dati parziali da importare.'
+          fi
 
       - name: Carica Excel completo
-        if: always() && (steps.scrape.outcome == 'success' || steps.download.outcome == 'success')
+        if: always() && (steps.scrape.outcome == 'success' || (steps.download.outcome == 'success' && !inputs.partial_data))
         uses: actions/upload-artifact@v4
         with:
           name: Buylist-Pokemon-Excel
@@ -110,6 +132,7 @@ jobs:
           path: |
             scrape.log
             sheets.log
+            sheets_partial.log
             *.checkpoint.jsonl
             *_PARZIALE.xlsx
             *.errore.json
