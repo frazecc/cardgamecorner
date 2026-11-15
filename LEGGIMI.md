@@ -1,102 +1,94 @@
-# CardGameCorner Buylist Pokémon — versione 3.2.0
+# CardGameCorner Buylist Pokémon — versione 5.0.0
 
-Sostituisci nel repository i due file contenuti nello ZIP, mantenendo i percorsi:
-- scraper.py
-- .github/workflows/scrape.yml
+Aggiorna scraper.py, sheets_sync.py, requirements.txt, tests/ e
+.github/workflows/scrape.yml mantenendo i percorsi e avvia un NUOVO Run workflow.
+Non usare Re-run jobs di un vecchio commit.
 
-Apri Actions > Estrai Buylist CardGameCorner > Run workflow sul branch main.
-Alla fine scarica l'artifact Buylist-Pokemon-Excel. Il workflow aggiornato conserva
-anche log, checkpoint e file parziali nell'artifact Buylist-Pokemon-Diagnostica.
+## Google Sheets e prestazioni
 
-## Copertura
+Leggi GOOGLE_SHEETS.md per collegare il tuo foglio esistente: due Secrets GitHub
+consentono l'importazione automatica al termine della scansione. Quattro schede
+CGC_ ricevono dati verificati in blocchi, senza modificare le altre schede.
+Un Excel parziale non sostituisce il risultato completo nel documento.
 
-Una ricerca vuota sul sito restituisce una selezione: nell'esecuzione controllata
-ha prodotto 226 carte in 12 pagine. La ricerca dell'espansione Base ha mostrato
-altre carte con prezzi buylist. Perciò la versione 3 percorre prima la ricerca
-generale, poi OGNI espansione presente nel filtro Edizione, leggendo TUTTE le
-pagine di ogni ricerca. Include espansioni giapponesi e promozionali quando sono
-presenti nel filtro. Non impone limiti al numero di carte o di pagine.
+La versione 5 controlla il caricamento con dati leggeri, trasferisce il JSON solo
+per le nuove carte, evita immagini/font/video e riscrive meno spesso il parziale.
+I link delle immagini restano nel risultato. Il workflow consente anche di
+importare un Excel completo precedente senza rifare lo scraping (publish_only).
 
-Nel foglio Espansioni trovi le ricerche completate e i conteggi. Il file viene
-chiamato Completa solo dopo aver terminato tutte le ricerche previste. Questo
-certifica la copertura dei risultati pubblicati attraverso quei filtri, non
-l'esistenza di carte che il sito non restituisce o non pubblica.
+## Tutti i prezzi pubblicati
 
-## Prezzi e varianti
+Il foglio principale Prezzi contiene ogni voce dell'elenco Variants restituito
+per ciascuna carta, con:
 
-Il foglio Carte contiene la lingua e la condizione selezionate dal sito per
-ciascun prodotto, con il prezzo visualizzato e i campi MinAcquisto/MaxAcquisto
-originali. Non bisogna interpretarli come prezzi validi per tutte le condizioni,
-lingue o varianti. Le lingue e condizioni disponibili sono elencate. Il foglio
-Dati_originali conserva tutti i campi dei prodotti caricati; le lunghe stringhe
-JSON sono suddivise in parti per evitare il limite delle celle Excel.
-Questa versione non enumera e non ricalcola ogni combinazione dei selettori.
+- ID carta e ID variante, nome, espansione, numero e immagine;
+- lingua e condizione esatte del sito;
+- foil/Reverse Holo e prima edizione esattamente come pubblicati;
+- BuyList e Credit in due colonne numeriche separate;
+- valutazione su richiesta, esclusione dalla buylist, prezzi zero e dati grezzi
+  BuyListLock/Quantity, senza scartare varianti.
 
-## Affidabilità
+Non calcola i prezzi moltiplicando il valore Near Mint e non genera combinazioni
+inesistenti. Se il sito pubblica solo alcune condizioni per una lingua, conserva
+quelle: le altre non hanno una quotazione pubblicata. ID variante diversi restano
+righe distinte anche quando lingua, condizione ed edizione coincidono.
 
-Controlla filtri, paginazione consecutiva e stabilità del numero di pagine per
-ciascuna ricerca. Deduplica con gli identificatori dei prodotti, senza fondere
-carte diverse solo perché hanno lo stesso nome. In caso di timeout attende ancora
-senza cliccare due volte e rischiare di saltare una pagina. Su errore termina con
-codice non zero e conserva una copia PARZIALE, senza presentarla come completa.
-Il giornale JSONL viene aggiornato dopo ogni pagina; la copia Excel parziale
-viene aggiornata ogni dieci ricerche e sugli errori intercettati. Il giornale è
-un checkpoint diagnostico: la ripresa automatica non è implementata.
+La stessa carta può comparire in più ricerche: le varianti si uniscono per ID,
+senza perdere quelle viste in precedenza. Per lo stesso ID e gli stessi attributi
+si conserva l'ultimo prezzo osservato. Cambiamenti di lingua/condizione/foil/prima
+edizione sotto lo stesso ID fanno interrompere l'esportazione. Dati Variants
+mancanti, JSON illeggibile o prezzi non validi non vengono ignorati.
 
-## Verifiche svolte
+Il foglio Carte contiene l'anagrafica e i conteggi delle varianti. Pagine ed
+Espansioni documentano la scansione, Info spiega campi e copertura, Dati_originali
+conserva i prodotti e le varianti raccolte in JSON, suddiviso in parti se necessario.
 
-- Sintassi Python e controlli sui filtri verificati.
-- Generazione e riapertura Excel con rapporto di copertura verificate.
-- Sul sito è stata verificata la paginazione e l'insufficienza della ricerca
-  generale confrontandola con l'espansione Base.
-- La scansione completa di tutte le espansioni della versione 3.1 deve ancora
-  essere eseguita. Non è stato verificato un conteggio finale completo.
+## Copertura delle carte
+
+Percorre la ricerca generale e OGNI espansione disponibile nel filtro Edizione,
+seguendo TUTTE le pagine. La ricerca generale da sola aveva restituito solo 226
+carte, mentre le ricerche per espansione ne hanno trovate altre. Non impone un
+limite al numero di carte, lingue, condizioni, varianti o pagine.
+
+Il file Completa viene creato solo se tutte le ricerche sono terminate e l'elenco
+delle espansioni non è cambiato. La copertura riguarda i dati pubblicati dal sito
+attraverso questi risultati; non include prezzi che il sito non fornisce.
+
+## Ricerche vuote ed errori
+
+Per il caso Awakened Heroes usa TotalRecords=0, zero pagine, nessuna riga,
+nessuna richiesta pendente, risposta HTTP riuscita, filtro corretto e stabilità.
+Attende una nuova risposta anche con risultati non vuoti e azzera l'attesa di
+stabilità quando lo stato cambia. Errori HTTP/rete non sono risultati vuoti.
+
+Su errore conserva il file PARZIALE e la diagnostica e termina con codice diverso
+da zero. Il JSONL viene aggiornato dopo ogni pagina, l'Excel parziale ogni quindici minuti e sugli errori intercettati. La ripresa automatica non è implementata:
+una nuova esecuzione riparte dall'inizio.
+
+## Verifiche
+
+- 42 test automatici, compresi il timeout reale e la gestione delle varianti.
+- Estrazione verificata sul checkpoint reale: 2.165 carte, 11.519 varianti.
+- Esportazione e rilettura Excel: verificati tutti gli ID, le lingue, le condizioni,
+  i prezzi buylist e i crediti delle 11.519 varianti, senza differenze.
+- Confronto sul sito: Charizard, Italiano, Excellent, First Edition mostra
+  BuyList 1879.95 e Credit 2519.95, come nei dati Variants.
+- La scansione completa di tutte le espansioni con la versione 5.0.0 deve ancora
+  terminare su GitHub Actions. I numeri sopra si riferiscono al parziale reale.
+
+Per ripetere i test dalla radice del pacchetto:
+
+    python -m unittest discover -s tests -v
 
 ## Uso locale
 
-    python -m pip install playwright pandas openpyxl
+    python -m pip install -r requirements.txt
     python -m playwright install --with-deps chromium
     python scraper.py
 
-Per vedere il browser: python scraper.py --headed
-Per aumentare il timeout per pagina: python scraper.py --timeout 180
+Browser visibile: python scraper.py --headed
+Timeout per pagina: python scraper.py --timeout 180
 
-Non viene effettuato login e non vengono aggiunti prodotti al carrello.
+Non serve un account. Non vengono aggiunte carte al carrello.
 
-## Correzioni della versione 3.1.0
-
-L'esecuzione GitHub 43708073186 si interrompeva con "Nessuna espansione
-disponibile". La versione 3.0 leggeva le opzioni dal select HTML dopo che la
-ricerca aveva chiuso il pannello Filtri. La 3.1 legge Filters.Expansions dai dati
-Angular già caricati, attende che l'elenco sia disponibile e riapre il pannello
-prima di selezionare ogni espansione. Usa i valori reali delle opzioni, anche
-quando Angular li codifica come stringhe invece che numeri.
-
-Corrette anche l'attesa dei risultati vuoti (ora devono stabilizzarsi), la
-stabilità del caricamento (si azzera se riprendono richieste), e l'attesa di
-ricerche diverse con risultati identici (non causa più un timeout ingiustificato).
-Il salvataggio di un parziale non nasconde l'errore originale in caso di guasto
-alla scrittura Excel. La diagnostica include lo stato letto dalla pagina.
-
-Sono passati 7 test automatici di regressione. È stata inoltre verificata con
-un modello DOM senza select la lettura degli ID numerici e stringa.
-Per ripetere i test: python -m unittest discover -s tests -v
-
-Per aggiornare la versione 3.0 basta sostituire scraper.py con quello di questo
-ZIP; il workflow è invariato. I test sono facoltativi per l'esecuzione.
-Questi controlli non sostituiscono una scansione completa sul sito: il totale
-finale di carte e la conclusione della scansione 3.1 restano da verificare.
-
-## Correzione 3.2.0 — ricerche con zero pagine
-
-Corretto il timeout con pagina=1, pagine=0, pending=0 quando manca il messaggio
-"Nessun prodotto corrisponde alla tua ricerca.". Prima di accettare il risultato
-vuoto lo script verifica una risposta JSON HTTP riuscita, l'assenza di richieste
-Angular pendenti, l'elenco prodotti vuoto, il filtro corretto e la stabilità per
-due secondi. Errori HTTP e di rete non vengono classificati come espansioni vuote.
-Il foglio Espansioni annota le ricerche che non restituiscono risultati.
-
-Passano 11 test automatici, incluso lo stato del timeout segnalato. Non è stata
-eseguita da qui una scansione completa del sito con la 3.2; il conteggio finale
-resta da verificare. Per aggiornare basta sostituire scraper.py e avviare una nuova
-esecuzione su main, senza rilanciare un vecchio job associato al vecchio commit.
+I test Google Sheets usano un modello API per verificare blocchi, quote, risposta persa, rifiuto dei parziali, pubblicazioni ripetute e conservazione delle schede precedenti. Non attestano una pubblicazione nel tuo account senza configurazione.

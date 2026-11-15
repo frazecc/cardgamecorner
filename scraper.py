@@ -4,15 +4,17 @@ Dipendenze: pip install playwright pandas openpyxl
 Browser:    playwright install chromium
 Avvio:      python scraper.py
 
-Il foglio Carte riporta i prezzi della combinazione selezionata dal sito per
-ciascuna carta, non un prezzo indistinto per tutte le lingue/condizioni.
-Dati_originali conserva tutti i campi dei prodotti restituiti dall'applicazione.
+Il foglio Prezzi riporta TUTTE le voci Variants restituite dal sito: lingua,
+condizione, foil e prima edizione, con BuyList e Credit distinti. Le combinazioni
+non pubblicate non vengono inventate. Carte contiene l'anagrafica dei prodotti.
+Dati_originali conserva tutti i campi dei prodotti raccolti dall'applicazione.
 Non aggiunge nulla al carrello e non richiede un account.
 """
 
 import argparse
 import hashlib
 import json
+import math
 import sys
 import time
 from datetime import datetime, timezone
@@ -24,13 +26,13 @@ from playwright.sync_api import sync_playwright
 
 URL = "https://www.cardgamecorner.com/it/buylist-2026?game=pokemon"
 OUTPUT = "CardGameCorner_Buylist_Pokemon_Completa.xlsx"
-VERSION = "3.3.1"
+VERSION = "5.0.0"
 MORE = 'button[ng-click="showMore()"]'
 PRODUCT = '[ng-repeat="product in expansion.Products"]'
 
 # Legge gli stessi oggetti usati dai template Angular della pagina. Non inventa
 # endpoint o selettori di prezzo e non interpreta div generici contenenti euro.
-READ_STATE = r"""() => {
+READ_STATE = r"""(options = {}) => {
     const input = document.querySelector('#simplesearch');
     if (!input || !window.angular) return null;
     const scope = angular.element(input).scope();
@@ -50,15 +52,28 @@ READ_STATE = r"""() => {
             return v;
         }));
     };
+    const seen = new Set(options.seen || []);
+    const all_keys = [];
     const rows = [...document.querySelectorAll('[ng-repeat="product in expansion.Products"]')].map(el => {
         const child = angular.element(el).scope();
         if (!child || !child.product) throw Error('Prodotto senza dati Angular.');
         const text = selector => (el.querySelector(selector)?.textContent || '').trim();
+        const expansion = child.expansion?.Expansion || '';
+        const name = text('h4.name');
+        const image = el.querySelector('img')?.getAttribute('data-ng-src') || el.querySelector('img')?.src || '';
+        const product = child.product;
+        const idField = ['Id', 'ProductId', 'ID', 'id', 'IdProduct'].find(k => product[k] != null);
+        const token = idField ? idField + ':' + product[idField] : JSON.stringify([image, expansion, name]);
+        all_keys.push(token);
+        // Le pagine di showMore possono contenere anche tutte le carte precedenti.
+        // Nei controlli frequenti non trasferire il grande JSON delle varianti.
+        if (options.probe) return {product: idField ? {[idField]:product[idField]} : {}, name, image, expansion};
+        if (seen.has(token)) return null;
         const selected = model => {
             const select = el.querySelector('select[ng-model="' + model + '"]');
             return select?.selectedOptions[0]?.textContent?.trim() || '';
         };
-        const options = model => [...(el.querySelector('select[ng-model="' + model + '"]')?.options || [])]
+        const option_labels = model => [...(el.querySelector('select[ng-model="' + model + '"]')?.options || [])]
             .map(o=>o.textContent.trim());
         return {
             product: clean(child.product),
@@ -70,13 +85,13 @@ READ_STATE = r"""() => {
             price_text: text('.buy-price'),
             language: selected('product.Language'),
             condition: selected('product.Condition'),
-            languages: options('product.Language'),
-            conditions: options('product.Condition'),
+            languages: option_labels('product.Language'),
+            conditions: option_labels('product.Condition'),
             reverse: el.querySelector('input[ng-model="product.Reverse"]')?.checked || false,
             first_edition: el.querySelector('input[ng-model="product.firstEdition"]')?.checked || false,
             evaluation: el.innerText.includes('Riceverai una valutazione'),
         };
-    });
+    }).filter(Boolean);
     return {
         page: Number(scope.PageNumber), pages: Number(scope.PageCount), pending,
         no_results: document.body.innerText.includes('Nessun prodotto corrisponde alla tua ricerca.'),
@@ -86,7 +101,7 @@ READ_STATE = r"""() => {
         editions: (scope.Filters?.Expansions || []).filter(exp=>exp.Id != null)
             .map(exp=>({id:exp.Id, name:exp.Espansione})),
         only_hot: scope.OnlyBuyList,
-        filters: clean(scope.SelectedFilters || {}), rows,
+        filters: clean(scope.SelectedFilters || {}), rows, all_keys,
         more: [...document.querySelectorAll('button[ng-click="showMore()"]')]
             .some(e=>e.getClientRects().length > 0),
         counters: Object.fromEntries(Object.entries(scope).filter(([k,v]) =>
@@ -108,6 +123,8 @@ def product_key(row):
 
 
 def fingerprint(state):
+    if 'all_keys' in state:
+        return tuple(state['all_keys'])
     return tuple(product_key(row) for row in state['rows'])
 
 
@@ -151,13 +168,13 @@ def start_search(page):
     page.locator('#button-search').click()
 
 
-def wait_ready(page, timeout, previous=None, expected_page=None, edition=None, require_editions=False):
+def wait_ready(page, timeout, previous=None, expected_page=None, edition=None, require_editions=False, seen=None):
     deadline = time.monotonic() + timeout
     stable = None
     since = None
     last = None
     while time.monotonic() < deadline:
-        state = page.evaluate(READ_STATE)
+        state = page.evaluate(READ_STATE, {'probe': True})
         last = state
         monitor = getattr(page, '_buylist_monitor', None)
         if monitor is not None and monitor.errors:
@@ -204,7 +221,14 @@ def wait_ready(page, timeout, previous=None, expected_page=None, edition=None, r
                 if marker != stable:
                     stable, since = marker, time.monotonic()
                 elif time.monotonic() - since >= 1.0:
-                    return state
+                    # Una sola lettura completa dopo il caricamento, con solo le
+                    # carte non ancora elaborate nella ricerca corrente.
+                    full = page.evaluate(READ_STATE, {'seen': list(seen or ())})
+                    if (full and full['pending'] == 0 and full['page'] == state['page']
+                            and full['pages'] == state['pages'] and full['filters'] == state['filters']
+                            and fingerprint(full) == signature):
+                        return full
+                    stable, since = None, None
                 page.wait_for_timeout(250)
                 continue
         stable, since = None, None
@@ -227,8 +251,101 @@ def validate_state(state, edition=None):
         raise RuntimeError('Numeri di pagina non validi.')
 
 
+VARIANT_DIMENSIONS = ('Language', 'Condition', 'Foil', 'FirstEdition')
+
+
+def parse_variants(row):
+    """Legge i prezzi originali, senza calcoli per condizione o lingua."""
+    value = row['product'].get('Variants')
+    try:
+        variants = json.loads(value) if isinstance(value, str) else value
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError(f"Variants non leggibile per {product_key(row)}") from exc
+    if not isinstance(variants, list):
+        raise RuntimeError(f"Elenco Variants mancante per {product_key(row)}")
+    unique = {}
+    for variant in variants:
+        if not isinstance(variant, dict):
+            raise RuntimeError(f"Variante non valida per {product_key(row)}")
+        required = ('IdProduct', *VARIANT_DIMENSIONS, 'BuyList', 'Credit', 'Evaluation', 'NoBuyList')
+        if any(field not in variant or variant[field] is None for field in required):
+            raise RuntimeError(f"Campi variante mancanti per {product_key(row)}")
+        if not str(variant['IdProduct']).strip():
+            raise RuntimeError('ID variante vuoto.')
+        if any(not isinstance(variant[field], str) for field in VARIANT_DIMENSIONS):
+            raise RuntimeError(f"Dimensioni variante non valide: {variant['IdProduct']}")
+        if not variant['Language'].strip() or not variant['Condition'].strip():
+            raise RuntimeError(f"Lingua/condizione assente: {variant['IdProduct']}")
+        for field in ('BuyList', 'Credit'):
+            number = variant[field]
+            if isinstance(number, bool) or not isinstance(number, (int, float)) or not math.isfinite(number) or number < 0:
+                raise RuntimeError(f"Prezzo {field} non valido: {variant['IdProduct']}")
+        if any(not isinstance(variant[field], bool) for field in ('Evaluation', 'NoBuyList')):
+            raise RuntimeError(f"Stato variante non valido: {variant['IdProduct']}")
+        key = str(variant['IdProduct'])
+        if key in unique and unique[key] != variant:
+            raise RuntimeError(f'ID variante duplicato con dati diversi: {key}')
+        unique[key] = variant
+    return list(unique.values())
+
+
+def merge_product_row(old, row):
+    """Unisce le varianti dello stesso prodotto incontrate in più ricerche."""
+    current = parse_variants(row)
+    if old is None:
+        return row
+    if (old['image'], old['name']) != (row['image'], row['name']):
+        raise RuntimeError(f'Identificatore ambiguo: {product_key(row)}. Nessuna fusione automatica.')
+    merged = {str(v['IdProduct']): v for v in parse_variants(old)}
+    for variant in current:
+        key = str(variant['IdProduct'])
+        previous = merged.get(key)
+        if previous and any(previous[field] != variant[field] for field in VARIANT_DIMENSIONS):
+            raise RuntimeError(f'ID variante con lingua/condizione/edizione diversa: {key}')
+        # Se il prezzo cambia durante la scansione conserva l'ultima osservazione.
+        merged[key] = variant
+    result = dict(row, product=dict(row['product']))
+    result['product']['Variants'] = json.dumps(list(merged.values()), ensure_ascii=False)
+    return result
+
+
+def price_rows(records):
+    prices = []
+    for key, row in records.items():
+        for variant in parse_variants(row):
+            if variant['NoBuyList']:
+                status = 'ESCLUSA DALLA BUYLIST'
+            elif variant['Evaluation']:
+                status = 'VALUTAZIONE SU RICHIESTA'
+            elif variant['BuyList'] > 0 or variant['Credit'] > 0:
+                status = 'PREZZO DISPONIBILE'
+            else:
+                status = 'SENZA PREZZO BUYLIST'
+            prices.append({
+                'ID carta': key,
+                'ID variante': str(variant['IdProduct']),
+                'Carta': row['name'],
+                'Espansione': row['expansion'],
+                'Numero carta': row['product'].get('SerialNumber'),
+                'Lingua': variant['Language'],
+                'Condizione (codice sito)': variant['Condition'],
+                'Foil (dato sito)': variant['Foil'],
+                'Prima edizione (dato sito)': variant['FirstEdition'],
+                'Prezzo buylist (€)': variant['BuyList'],
+                'Credito (€)': variant['Credit'],
+                'Stato': status,
+                'Valutazione su richiesta': variant['Evaluation'],
+                'Esclusa dalla buylist': variant['NoBuyList'],
+                'BuyListLock (dato sito)': variant.get('BuyListLock'),
+                'Quantità (dato sito)': variant.get('Quantity'),
+                'Immagine': row['image'],
+            })
+    return prices
+
+
 def save_excel(path, records, pages_log, complete, error='', queries_log=None):
     queries_log = queries_log or []
+    prices = price_rows(records)
     cards, raw = [], []
     for key, row in records.items():
         p = row['product']
@@ -237,16 +354,10 @@ def save_excel(path, records, pages_log, complete, error='', queries_log=None):
             'Carta': row['name'],
             'Nome alternativo': row['name_en'],
             'Espansione': row['expansion'],
-            'Prezzo Buylist (testo sito)': row['price_text'],
-            'MinAcquisto (dato sito)': p.get('MinAcquisto'),
-            'MaxAcquisto (dato sito)': p.get('MaxAcquisto'),
-            'Lingua selezionata': row['language'],
-            'Condizione selezionata': row['condition'],
-            'Reverse selezionato': row['reverse'],
-            'Prima edizione selezionata': row['first_edition'],
-            'Valutazione su richiesta': row['evaluation'],
-            'Lingue disponibili': ', '.join(row['languages']),
-            'Condizioni disponibili': ', '.join(row['conditions']),
+            'Numero carta': p.get('SerialNumber'),
+            'Numero varianti': len(parse_variants(row)),
+            'Lingue nelle varianti': ', '.join(dict.fromkeys(v['Language'] for v in parse_variants(row))),
+            'Condizioni nelle varianti': ', '.join(dict.fromkeys(v['Condition'] for v in parse_variants(row))),
             'Immagine': row['image'],
         })
         payload = json.dumps(p, ensure_ascii=False, sort_keys=True)
@@ -259,9 +370,14 @@ def save_excel(path, records, pages_log, complete, error='', queries_log=None):
         {'Voce': 'Versione scraper', 'Valore': VERSION},
         {'Voce': 'Data UTC', 'Valore': datetime.now(timezone.utc).isoformat()},
         {'Voce': 'Carte distinte', 'Valore': len(cards)},
+        {'Voce': 'Varianti nel foglio Prezzi', 'Valore': len(prices)},
+        {'Voce': 'Carte senza varianti pubblicate', 'Valore': sum(not parse_variants(row) for row in records.values())},
         {'Voce': 'Pagine caricate', 'Valore': len(pages_log)},
         {'Voce': 'Ricerche completate', 'Valore': sum(q['Stato'] == 'COMPLETATA' for q in queries_log)},
-        {'Voce': 'Prezzi', 'Valore': 'Combinazione selezionata dal sito per ogni carta. Non tutte le combinazioni lingua/condizione.'},
+        {'Voce': 'Prezzi', 'Valore': 'Tutte le voci Variants pubblicate: BuyList e Credit originali per lingua, condizione, foil e prima edizione. Nessun moltiplicatore o combinazione inventata.'},
+        {'Voce': 'Codici condizione', 'Valore': 'NM/M = Near Mint; SP = Excellent; HP = Heavily Played; D = Poor/Damaged (etichette dei selettori del sito).'},
+        {'Voce': 'Righe senza prezzo', 'Valore': 'Conservate anche valutazioni su richiesta, esclusioni e prezzi zero. Zero non è una quotazione positiva.'},
+        {'Voce': 'ID variante', 'Valore': 'Ogni IdProduct resta distinto, anche con uguale lingua/condizione. Se ritrovato con gli stessi attributi, si conserva il prezzo dell’ultima osservazione.'},
         {'Voce': 'Copertura', 'Valore': 'Ricerca generale e ricerca separata per ogni espansione disponibile; tutte le pagine di ciascuna ricerca.'},
         {'Voce': 'Errore', 'Valore': error},
     ]
@@ -273,26 +389,35 @@ def save_excel(path, records, pages_log, complete, error='', queries_log=None):
         return df
     temp = path.with_name(path.stem + '.tmp.xlsx')
     with pd.ExcelWriter(temp, engine='openpyxl') as writer:
-        for name, items in [('Carte', cards), ('Pagine', pages_log), ('Info', info), ('Espansioni', queries_log), ('Dati_originali', raw)]:
+        for name, items in [('Prezzi', prices), ('Carte', cards), ('Pagine', pages_log), ('Info', info), ('Espansioni', queries_log), ('Dati_originali', raw)]:
             frame(items).to_excel(writer, sheet_name=name, index=False)
             sheet = writer.sheets[name]
             sheet.freeze_panes = 'A2'
             sheet.auto_filter.ref = sheet.dimensions
             for column in sheet.columns:
                 sheet.column_dimensions[column[0].column_letter].width = min(65, max(14, len(str(column[0].value or '')) + 3))
+                if column[0].value in ('Prezzo buylist (€)', 'Credito (€)'):
+                    for cell in column[1:]:
+                        cell.number_format = '#,##0.00'
     temp.replace(path)
 
 
-def scrape(output, timeout=120, headed=False):
+def scrape(output, timeout=120, headed=False, partial_interval=900, load_images=False):
     output = Path(output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     partial = output.with_name(output.stem.replace('_Completa', '') + '_PARZIALE.xlsx')
     checkpoint = output.with_suffix('.checkpoint.jsonl')
     records, log, queries_log = {}, [], []
+    last_partial = time.monotonic()
     print(f'CardGameCorner scraper {VERSION} | {URL}', flush=True)
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=not headed)
         page = browser.new_page(viewport={'width': 1920, 'height': 1080})
+        if not load_images:
+            # Gli URL delle immagini restano nei dati esportati; per raccogliere
+            # i prezzi non servono i file grafici, i video o i font scaricati.
+            page.route('**/*', lambda route: route.abort() if route.request.resource_type
+                       in ('image', 'media', 'font') else route.continue_())
         page.set_default_timeout(timeout * 1000)
         page._buylist_monitor = SearchMonitor(page)
         try:
@@ -350,26 +475,27 @@ def scrape(output, timeout=120, headed=False):
                         state = wait_ready(page, timeout, expected_page=1, edition=edition)
                     validate_state(state, edition)
                     query_seen = set()
+                    query_tokens = set()
                     expected_page = 1
                     expected_pages = state['pages']
                     while state['rows']:
                         validate_state(state, edition)
                         if state['page'] != expected_page or state['pages'] != expected_pages:
                             raise RuntimeError('Paginazione cambiata o non consecutiva. Risultato parziale.')
-                        new_rows, new_local = [], 0
+                        new_rows, updated_rows, new_local = [], [], 0
                         for row in state['rows']:
                             if not row['name']:
                                 raise RuntimeError('Template di una carta non ancora caricato.')
                             key = product_key(row)
                             old = records.get(key)
-                            if old and (old['image'], old['name']) != (row['image'], row['name']):
-                                raise RuntimeError(f'Identificatore ambiguo: {key}. Nessuna fusione automatica.')
+                            merged = merge_product_row(old, row)
                             if key not in query_seen:
                                 new_local += 1
                                 query_seen.add(key)
                             if key not in records:
                                 new_rows.append(row)
-                            records[key] = row
+                            records[key] = merged
+                            updated_rows.append(merged)
                         if new_local == 0:
                             raise RuntimeError('Pagina senza carte nuove nella ricerca corrente.')
                         item = {'Espansione ricercata': query['name'], 'Pagina': state['page'],
@@ -377,8 +503,9 @@ def scrape(output, timeout=120, headed=False):
                                 'Carte nella ricerca': len(query_seen), 'Carte distinte cumulative': len(records),
                                 'Contatori sito': json.dumps(state['counters'], ensure_ascii=False)}
                         log.append(item)
+                        query_tokens.update(state.get('all_keys', ()))
                         query_log.update(Pagine=expected_page, **{'Carte nella ricerca': len(query_seen)})
-                        journal.write(json.dumps({'pagina': item, 'righe': new_rows}, ensure_ascii=False) + '\n')
+                        journal.write(json.dumps({'pagina': item, 'righe': updated_rows}, ensure_ascii=False) + '\n')
                         journal.flush()
                         print(f"  Pagina {state['page']}/{expected_pages} | ricerca {len(query_seen)} | totale distinto {len(records)}", flush=True)
                         if state['page'] == expected_pages:
@@ -390,7 +517,7 @@ def scrape(output, timeout=120, headed=False):
                         expected_page += 1
                         for attempt in range(3):
                             try:
-                                state = wait_ready(page, timeout, previous, expected_page, edition)
+                                state = wait_ready(page, timeout, previous, expected_page, edition, seen=query_tokens)
                                 break
                             except RuntimeError:
                                 if attempt == 2:
@@ -404,10 +531,11 @@ def scrape(output, timeout=120, headed=False):
                     query_log['Stato'] = 'COMPLETATA'
                     journal.write(json.dumps({'ricerca_completata': query_log}, ensure_ascii=False) + '\n')
                     journal.flush()
-                    # Il giornale viene aggiornato dopo ogni pagina; ogni dieci
-                    # ricerche si aggiorna anche la copia Excel parziale.
-                    if (query_index + 1) % 10 == 0:
+                    # Il JSONL rimane aggiornato dopo ogni pagina. L'Excel grande
+                    # viene riscritto a intervalli, anziché ogni dieci espansioni.
+                    if partial_interval and time.monotonic() - last_partial >= partial_interval:
                         save_excel(partial, records, log, False, queries_log=queries_log)
+                        last_partial = time.monotonic()
             if len(queries_log) != len(queries) or any(q['Stato'] != 'COMPLETATA' for q in queries_log):
                 raise RuntimeError('Non tutte le espansioni sono state completate.')
             final_editions = page.evaluate(READ_STATE)['editions']
@@ -417,7 +545,8 @@ def scrape(output, timeout=120, headed=False):
                 raise RuntimeError('Nessuna carta estratta.')
             save_excel(output, records, log, True, queries_log=queries_log)
             partial.unlink(missing_ok=True)
-            print(f'ESTRAZIONE COMPLETATA: {len(records)} carte, {len(log)} pagine, {len(editions)} espansioni. File: {output}', flush=True)
+            total_variants = sum(len(parse_variants(row)) for row in records.values())
+            print(f'ESTRAZIONE COMPLETATA: {len(records)} carte, {total_variants} varianti, {len(log)} pagine, {len(editions)} espansioni. File: {output}', flush=True)
         except Exception as exc:
             if records:
                 try:
@@ -452,10 +581,15 @@ def main():
     parser.add_argument('--output', default=OUTPUT)
     parser.add_argument('--timeout', type=int, default=120, help='Timeout in secondi per ogni pagina')
     parser.add_argument('--headed', action='store_true', help='Mostra il browser durante la lettura locale')
+    parser.add_argument('--load-images', action='store_true', help='Scarica anche immagini, font e video (più lento)')
+    parser.add_argument('--partial-interval', type=int, default=900,
+                        help='Secondi tra copie Excel parziali; 0 = solo su errore (JSONL sempre aggiornato)')
     args = parser.parse_args()
     if args.timeout < 1:
         parser.error('--timeout deve essere positivo')
-    scrape(args.output, args.timeout, args.headed)
+    if args.partial_interval < 0:
+        parser.error('--partial-interval non può essere negativo')
+    scrape(args.output, args.timeout, args.headed, args.partial_interval, args.load_images)
 
 
 if __name__ == '__main__':
