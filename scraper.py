@@ -30,7 +30,7 @@ def scrape_by_expansions():
         # Cerchiamo i link all'interno dei filtri delle edizioni
         expansion_locators = page.locator(".edizioni a, .filters a, select#edizione option, [class*='edition'] a, [class*='expansion'] a").all()
         
-        print(Trovati if len(expansion_locators) > 0 else "Nessun filtro specifico trovato, procedo con estrazione estesa.")
+        print(f"Trovati {len(expansion_locators)} filtri di espansione." if expansion_locators else "Nessun filtro specifico trovato, procedo con estrazione estesa.")
 
         # Se ci sono espansioni selezionabili, clicchiamo su ognuna per estrarre le carte dedicate
         # Altrimenti eseguiamo uno scroll massivo di tutto il catalogo unificato
@@ -105,9 +105,16 @@ def scrape_by_expansions():
 
         browser.close()
 
+    if not all_cards:
+        raise RuntimeError(
+            "Nessuna carta estratta: controllare il caricamento della pagina "
+            "e i selettori. Il file Excel non è stato creato."
+        )
+
     df = pd.DataFrame(all_cards)
     df.to_excel("CardGameCorner_Buylist_Pokemon_Completa.xlsx", index=False)
     print(f"Totale carte estratte: {len(df)}")
 
 if __name__ == "__main__":
     scrape_by_expansions()
+
