@@ -1,0 +1,205 @@
+[
+  {
+    "product": {
+      "Id": "BS0004",
+      "Game": "pokemon",
+      "Model": "Charizard",
+      "ModelEn": "Charizard",
+      "ModelSeo": "charizard",
+      "ModelSeoEn": "charizard",
+      "Image": "/products/pokemon/cha/charizard/base-charizard-273699.jpg",
+      "Color": "",
+      "ColorLong": "Unl.",
+      "Rarity": "Rare Holo.",
+      "CategorySeo": "base",
+      "Category": "Base",
+      "IdCategory": 2364,
+      "Icon": "bs.jpg",
+      "Quantity": 1,
+      "Variants": "[{\"IdProduct\":2302999,\"FirstEdition\":\"First Edition\",\"Condition\":\"NM/M\",\"Foil\":\"\",\"Language\":\"Italiano\",\"Price\":11499.9000,\"BuyList\":6554.95,\"Credit\":7589.95,\"Evaluation\":false,\"BuyListLock\":0,\"NoBuyList\":false,\"Quantity\":0},{\"IdProduct\":2881456,\"FirstEdition\":\"\",\"Condition\":\"NM/M\",\"Foil\":\"\",\"Language\":\"Italiano\",\"Price\":1399.9000,\"BuyList\":797.95,\"Credit\":923.95,\"Evaluation\":false,\"BuyListLock\":1,\"NoBuyList\":false,\"Quantity\":1},{\"IdProduct\":3175205,\"FirstEdition\":\"First Edition\",\"Condition\":\"NM/M\",\"Foil\":\"\",\"Language\":\"Italiano\",\"Price\":11499.9000,\"BuyList\":6554.95,\"Credit\":7589.95,\"Evaluation\":false,\"BuyListLock\":0,\"NoBuyList\":false,\"Quantity\":1},{\"IdProduct\":1032407,\"FirstEdition\":\"\",\"Condition\":\"SP\",\"Foil\":\"\",\"Language\":\"Italiano\",\"Price\":799.9000,\"BuyList\":599.95,\"Credit\":649.95,\"Evaluation\":false,\"BuyListLock\":0,\"NoBuyList\":false,\"Quantity\":1},{\"IdProduct\":2303001,\"FirstEdition\":\"First Edition\",\"Condition\":\"SP\",\"Foil\":\"\",\"Language\":\"Italiano\",\"Price\":3999.9000,\"BuyList\":1879.95,\"Credit\":2519.95,\"Evaluation\":false,\"BuyListLock\":0,\"NoBuyList\":false,\"Quantity\":0},{\"IdProduct\":3214467,\"FirstEdition\":\"\",\"Condition\":\"SP\",\"Foil\":\"\",\"Language\":\"Italiano\",\"Price\":999.9000,\"BuyList\":599.95,\"Credit\":649.95,\"Evaluation\":false,\"BuyListLock\":0,\"NoBuyList\":false,\"Quantity\":1},{\"IdProduct\":1032406,\"FirstEdition\":\"\",\"Condition\":\"HP\",\"Foil\":\"\",\"Language\":\"Italiano\",\"Price\":449.9000,\"BuyList\":269.95,\"Credit\":269.95,\"Evaluation\":false,\"BuyListLock\":1,\"NoBuyList\":false,\"Quantity\":0},{\"IdProduct\":2302998,\"FirstEdition\":\"First Edition\",\"Condition\":\"HP\",\"Foil\":\"\",\"Language\":\"Italiano\",\"Price\":1999.9000,\"BuyList\":1399.95,\"Credit\":1399.95,\"Evaluation\":false,\"BuyListLock\":0,\"NoBuyList\":false,\"Quantity\":0},{\"IdProduct\":1032405,\"FirstEdition\":\"\",\"Condition\":\"D\",\"Foil\":\"\",\"Language\":\"Italiano\",\"Price\":219.9000,\"BuyList\":0.00,\"Credit\":0.00,\"Evaluation\":false,\"BuyListLock\":0,\"NoBuyList\":false,\"Quantity\":1},{\"IdProduct\":1547643,\"FirstEdition\":\"First Edition\",\"Condition\":\"D\",\"Foil\":\"\",\"Language\":\"Italiano\",\"Price\":999.9000,\"BuyList\":0.00,\"Credit\":0.00,\"Evaluation\":false,\"BuyListLock\":0,\"NoBuyList\":false,\"Quantity\":0},{\"IdProduct\":3106905,\"FirstEdition\":\"\",\"Condition\":\"D\",\"Foil\":\"\",\"Language\":\"Italiano\",\"Price\":179.9000,\"BuyList\":0.00,\"Credit\":0.00,\"Evaluation\":false,\"BuyListLock\":0,\"NoBuyList\":false,\"Quantity\":4},{\"IdProduct\":3138581,\"FirstEdition\":\"\",\"Condition\":\"D\",\"Foil\":\"\",\"Language\":\"Italiano\",\"Price\":319.9000,\"BuyList\":0.00,\"Credit\":0.00,\"Evaluation\":false,\"BuyListLock\":0,\"NoBuyList\":false,\"Quantity\":0},{\"IdProduct\":3145623,\"FirstEdition\":\"\",\"Condition\":\"D\",\"Foil\":\"\",\"Language\":\"Italiano\",\"Price\":299.9000,\"BuyList\":0.00,\"Credit\":0.00,\"Evaluation\":false,\"BuyListLock\":0,\"NoBuyList\":false,\"Quantity\":1},{\"IdProduct\":1031979,\"FirstEdition\":\"\",\"Condition\":\"NM/M\",\"Foil\":\"\",\"Language\":\"English\",\"Price\":1099.9000,\"BuyList\":626.95,\"Credit\":725.95,\"Evaluation\":false,\"BuyListLock\":1,\"NoBuyList\":false,\"Quantity\":0},{\"IdProduct\":3163032,\"FirstEdition\":\"\",\"Condition\":\"NM/M\",\"Foil\":\"\",\"Language\":\"English\",\"Price\":824.9250,\"BuyList\":626.95,\"Credit\":725.95,\"Evaluation\":false,\"BuyListLock\":0,\"NoBuyList\":false,\"Quantity\":0},{\"IdProduct\":1195762,\"FirstEdition\":\"\",\"Condition\":\"SP\",\"Foil\":\"\",\"Language\":\"English\",\"Price\":649.9000,\"BuyList\":305.45,\"Credit\":409.45,\"Evaluation\":false,\"BuyListLock\":1,\"NoBuyList\":false,\"Quantity\":0},{\"IdProduct\":1134459,\"FirstEdition\":\"\",\"Condition\":\"HP\",\"Foil\":\"\",\"Language\":\"English\",\"Price\":399.9000,\"BuyList\":219.95,\"Credit\":239.95,\"Evaluation\":false,\"BuyListLock\":0,\"NoBuyList\":false,\"Quantity\":0},{\"IdProduct\":1383423,\"FirstEdition\":\"\",\"Condition\":\"D\",\"Foil\":\"\",\"Language\":\"English\",\"Price\":159.9000,\"BuyList\":0.00,\"Credit\":0.00,\"Evaluation\":false,\"BuyListLock\":0,\"NoBuyList\":false,\"Quantity\":0},{\"IdProduct\":2382806,\"FirstEdition\":\"\",\"Condition\":\"SP\",\"Foil\":\"\",\"Language\":\"German\",\"Price\":79.9000,\"BuyList\":0.00,\"Credit\":0.00,\"Evaluation\":false,\"BuyListLock\":0,\"NoBuyList\":false,\"Quantity\":0},{\"IdProduct\":1747489,\"FirstEdition\":\"\",\"Condition\":\"D\",\"Foil\":\"\",\"Language\":\"German\",\"Price\":49.9000,\"BuyList\":0.00,\"Credit\":0.00,\"Evaluation\":false,\"BuyListLock\":0,\"NoBuyList\":false,\"Quantity\":0}]",
+      "MinPrice": 1399.9,
+      "MaxPrice": 1399.9,
+      "MinAcquisto": 6554.95,
+      "MaxAcquisto": 7589.95,
+      "BuyListLock": true,
+      "HotBuyList": true,
+      "NoBuyList": false,
+      "SerialNumber": 4,
+      "SerialNumber_keyword": null,
+      "Language": 71,
+      "Condition": 1093,
+      "Qty": 0,
+      "Modern": false,
+      "idMetaproduct": 211560,
+      "Evaluation": false,
+      "isFoil": false,
+      "CategorySortOrder": 2001,
+      "Flag": "",
+      "Languages": [
+        {
+          "id": 71,
+          "description": "Italiano",
+          "short": "IT"
+        },
+        {
+          "id": 72,
+          "description": "English",
+          "short": "EN"
+        },
+        {
+          "id": 74,
+          "description": "German",
+          "short": "DE"
+        }
+      ],
+      "Reverse": false,
+      "firstEdition": true,
+      "Conditions": [
+        {
+          "id": 1093,
+          "description": "Near Mint",
+          "short": "NM/M",
+          "multiplier": 1
+        },
+        {
+          "id": 1094,
+          "description": "Excellent",
+          "short": "SP",
+          "multiplier": 0.9
+        },
+        {
+          "id": 1319,
+          "description": "Heavily Played",
+          "short": "HP",
+          "multiplier": 0.8
+        },
+        {
+          "id": 1320,
+          "description": "Poor/Damaged",
+          "short": "D",
+          "multiplier": 1
+        }
+      ],
+      "isFirstEdPresent": true
+    },
+    "expansion": "Base",
+    "name": "Charizard",
+    "name_en": "",
+    "image": "https://www.cardgamecorner.com/products/pokemon/cha/charizard/mini/base-charizard-273699.jpg",
+    "price_text": "6.554,95 €  / 7.589,95 €",
+    "language": "Italiano",
+    "condition": "Near Mint",
+    "languages": [
+      "Italiano",
+      "English",
+      "German"
+    ],
+    "conditions": [
+      "Near Mint",
+      "Excellent",
+      "Heavily Played",
+      "Poor/Damaged"
+    ],
+    "reverse": false,
+    "first_edition": true,
+    "evaluation": false
+  },
+  {
+    "product": {
+      "Id": "LOR0186",
+      "Game": "pokemon",
+      "Model": "Giratina V ",
+      "ModelEn": "Giratina V",
+      "ModelSeo": "giratina-v",
+      "ModelSeoEn": "giratina-v",
+      "Image": "/products/pokemon/gir/giratina-v/lost-origin-giratina-v-674192.jpg",
+      "Color": "",
+      "ColorLong": "Unl.",
+      "Rarity": "Rare Ultra.",
+      "CategorySeo": "lost-origin",
+      "Category": "Lost Origin",
+      "IdCategory": 3249,
+      "Icon": "lor.jpg",
+      "Quantity": 0,
+      "Variants": "[{\"IdProduct\":1517779,\"FirstEdition\":\"\",\"Condition\":\"NM/M\",\"Foil\":\"\",\"Language\":\"Italiano\",\"Price\":749.9000,\"BuyList\":562.45,\"Credit\":562.45,\"Evaluation\":false,\"BuyListLock\":1,\"NoBuyList\":false,\"Quantity\":0},{\"IdProduct\":3106153,\"FirstEdition\":\"\",\"Condition\":\"NM/M\",\"Foil\":\"\",\"Language\":\"Italiano\",\"Price\":698.9000,\"BuyList\":562.45,\"Credit\":562.45,\"Evaluation\":false,\"BuyListLock\":0,\"NoBuyList\":false,\"Quantity\":0},{\"IdProduct\":2252945,\"FirstEdition\":\"\",\"Condition\":\"SP\",\"Foil\":\"\",\"Language\":\"Italiano\",\"Price\":528.9000,\"BuyList\":317.35,\"Credit\":343.80,\"Evaluation\":false,\"BuyListLock\":0,\"NoBuyList\":false,\"Quantity\":0},{\"IdProduct\":2253197,\"FirstEdition\":\"\",\"Condition\":\"HP\",\"Foil\":\"\",\"Language\":\"Italiano\",\"Price\":319.9000,\"BuyList\":0.00,\"Credit\":0.00,\"Evaluation\":true,\"BuyListLock\":0,\"NoBuyList\":false,\"Quantity\":0},{\"IdProduct\":2253450,\"FirstEdition\":\"\",\"Condition\":\"D\",\"Foil\":\"\",\"Language\":\"Italiano\",\"Price\":179.9000,\"BuyList\":0.00,\"Credit\":0.00,\"Evaluation\":false,\"BuyListLock\":0,\"NoBuyList\":false,\"Quantity\":0},{\"IdProduct\":1517778,\"FirstEdition\":\"\",\"Condition\":\"NM/M\",\"Foil\":\"\",\"Language\":\"English\",\"Price\":799.9000,\"BuyList\":527.95,\"Credit\":559.95,\"Evaluation\":false,\"BuyListLock\":1,\"NoBuyList\":false,\"Quantity\":0},{\"IdProduct\":3214362,\"FirstEdition\":\"\",\"Condition\":\"NM/M\",\"Foil\":\"\",\"Language\":\"English\",\"Price\":649.9000,\"BuyList\":527.95,\"Credit\":559.95,\"Evaluation\":false,\"BuyListLock\":0,\"NoBuyList\":false,\"Quantity\":0}]",
+      "MinPrice": 749.9,
+      "MaxPrice": 749.9,
+      "MinAcquisto": 562.45,
+      "MaxAcquisto": 562.45,
+      "BuyListLock": true,
+      "HotBuyList": true,
+      "NoBuyList": false,
+      "SerialNumber": 186,
+      "SerialNumber_keyword": null,
+      "Language": 71,
+      "Condition": 1093,
+      "Qty": 0,
+      "Modern": true,
+      "idMetaproduct": 409987,
+      "Evaluation": false,
+      "isFoil": false,
+      "CategorySortOrder": 2152,
+      "Flag": "",
+      "Languages": [
+        {
+          "id": 71,
+          "description": "Italiano",
+          "short": "IT"
+        },
+        {
+          "id": 72,
+          "description": "English",
+          "short": "EN"
+        }
+      ],
+      "Reverse": false,
+      "firstEdition": false,
+      "Conditions": [
+        {
+          "id": 1093,
+          "description": "Near Mint",
+          "short": "NM/M",
+          "multiplier": 1
+        },
+        {
+          "id": 1094,
+          "description": "Excellent",
+          "short": "SP",
+          "multiplier": 0.9
+        },
+        {
+          "id": 1319,
+          "description": "Heavily Played",
+          "short": "HP",
+          "multiplier": 0.8
+        },
+        {
+          "id": 1320,
+          "description": "Poor/Damaged",
+          "short": "D",
+          "multiplier": 1
+        }
+      ]
+    },
+    "expansion": "Lost Origin",
+    "name": "Giratina V",
+    "name_en": "Giratina V",
+    "image": "https://www.cardgamecorner.com/products/pokemon/gir/giratina-v/mini/lost-origin-giratina-v-674192.jpg",
+    "price_text": "562,45 €  / 562,45 €",
+    "language": "Italiano",
+    "condition": "Near Mint",
+    "languages": [
+      "Italiano",
+      "English"
+    ],
+    "conditions": [
+      "Near Mint",
+      "Excellent",
+      "Heavily Played",
+      "Poor/Damaged"
+    ],
+    "reverse": false,
+    "first_edition": false,
+    "evaluation": false
+  }
+]

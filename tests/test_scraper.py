@@ -17,7 +17,7 @@ class FakePage:
         self.index = 0
         self.clock = 0
 
-    def evaluate(self, script):
+    def evaluate(self, script, argument=None):
         value = self.states[min(self.index, len(self.states) - 1)]
         self.index += 1
         return value
@@ -70,8 +70,8 @@ class WaitTests(unittest.TestCase):
 
     def test_zero_pages_without_message_is_valid_after_response(self):
         from types import SimpleNamespace
-        page = FakePage([state(page=1, pages=0, rows=[], no_results=False, data_empty=True)])
-        page._buylist_monitor = SimpleNamespace(errors=[], successful_json=1)
+        page = FakePage([state(page=1, pages=0, rows=[], no_results=False, data_empty=True, counters={'TotalRecords': 0})])
+        page._buylist_monitor = SimpleNamespace(errors=[], successful_json=1, successful_responses=1)
         result = self.wait(page)
         self.assertTrue(result['empty_confirmed'])
         scraper.validate_state(result)
@@ -79,25 +79,76 @@ class WaitTests(unittest.TestCase):
 
     def test_zero_pages_without_response_is_not_valid(self):
         from types import SimpleNamespace
-        page = FakePage([state(page=1, pages=0, rows=[], no_results=False, data_empty=True)])
-        page._buylist_monitor = SimpleNamespace(errors=[], successful_json=0)
+        page = FakePage([state(page=1, pages=0, rows=[], no_results=False, data_empty=True, counters={'TotalRecords': 0})])
+        page._buylist_monitor = SimpleNamespace(errors=[], successful_json=0, successful_responses=0)
         with self.assertRaises(RuntimeError):
             self.wait(page)
 
     def test_http_failure_is_not_treated_as_empty(self):
         from types import SimpleNamespace
         page = FakePage([state(pages=0, rows=[], no_results=True, data_empty=True)])
-        page._buylist_monitor = SimpleNamespace(errors=['HTTP 500'], successful_json=0)
+        page._buylist_monitor = SimpleNamespace(errors=['HTTP 500'], successful_json=0, successful_responses=0)
         with self.assertRaisesRegex(RuntimeError, 'HTTP 500'):
             self.wait(page)
 
     def test_zero_page_during_render_does_not_finish_early(self):
         from types import SimpleNamespace
-        page = FakePage([state(pages=0, rows=[], data_empty=True), state()])
-        page._buylist_monitor = SimpleNamespace(errors=[], successful_json=1)
+        page = FakePage([state(pages=0, rows=[], data_empty=True, counters={'TotalRecords': 0}), state()])
+        page._buylist_monitor = SimpleNamespace(errors=[], successful_json=1, successful_responses=1)
         result = self.wait(page)
         self.assertTrue(result['rows'])
         self.assertFalse(result.get('empty_confirmed', False))
+
+    def test_actual_awakened_heroes_diagnostic(self):
+        import json
+        from pathlib import Path
+        from types import SimpleNamespace
+        # Fixture reale ridotta dalla diagnostica del run GitHub 43720700350.
+        actual = state(page=1, pages=0, pending=0, no_results=False,
+                       data_empty=False, rows=[], filters={'edition': 2954},
+                       counters={'PageCount': 0, 'PageCountHC': 1, 'TotalRecords': 0})
+        page = FakePage([actual])
+        page._buylist_monitor = SimpleNamespace(errors=[], successful_responses=1, successful_json=0)
+        result = self.wait(page, edition=2954, expected_page=1)
+        self.assertTrue(result['empty_confirmed'])
+        scraper.validate_state(result, 2954)
+
+    def test_zero_pages_with_positive_total_is_not_empty(self):
+        from types import SimpleNamespace
+        page = FakePage([state(pages=0, rows=[], no_results=False,
+                               counters={'TotalRecords': 12})])
+        page._buylist_monitor = SimpleNamespace(errors=[], successful_responses=1)
+        with self.assertRaises(RuntimeError):
+            self.wait(page)
+
+    def test_old_rows_without_new_response_are_rejected(self):
+        from types import SimpleNamespace
+        page = FakePage([state()])
+        page._buylist_monitor = SimpleNamespace(errors=[], successful_responses=0)
+        with self.assertRaises(RuntimeError):
+            self.wait(page)
+
+    def test_stale_empty_message_with_positive_total_is_rejected(self):
+        from types import SimpleNamespace
+        page = FakePage([state(pages=0, rows=[], no_results=True,
+                               counters={'TotalRecords': 12})])
+        page._buylist_monitor = SimpleNamespace(errors=[], successful_responses=1)
+        with self.assertRaises(RuntimeError):
+            self.wait(page)
+
+    def test_interrupted_render_resets_stability(self):
+        page = FakePage([state(), state(), state(rows=[]), state()])
+        self.wait(page)
+        self.assertGreaterEqual(page.clock, 1.75)
+
+    def test_interrupted_empty_state_resets_stability(self):
+        from types import SimpleNamespace
+        empty = state(pages=0, rows=[], counters={'TotalRecords': 0})
+        invalid = state(pages=0, rows=[], counters={'TotalRecords': 4})
+        page = FakePage([empty, empty, invalid, empty])
+        page._buylist_monitor = SimpleNamespace(errors=[], successful_responses=1)
+        self.wait(page)
+        self.assertGreaterEqual(page.clock, 2.75)
 
 
 if __name__ == '__main__':
