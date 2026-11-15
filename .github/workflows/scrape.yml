@@ -2,9 +2,19 @@ name: Estrai Buylist CardGameCorner
 
 on:
   workflow_dispatch:
+    inputs:
+      publish_only:
+        description: 'Importa in Sheets un Excel completo già prodotto, senza ripetere lo scraping'
+        type: boolean
+        default: false
+      source_run_id:
+        description: 'Solo con publish_only: ID del run che contiene Buylist-Pokemon-Excel'
+        type: string
+        required: false
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: cardgamecorner-buylist-${{ github.ref }}
@@ -14,6 +24,8 @@ jobs:
   run-scraper:
     runs-on: ubuntu-24.04
     timeout-minutes: 360
+    env:
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -25,15 +37,64 @@ jobs:
 
       - name: Installa dipendenze
         run: |
-          python -m pip install 'playwright>=1.48,<2' 'pandas>=2.2,<4' 'openpyxl>=3.1,<4'
+          python -m pip install -r requirements.txt
+
+      - name: Verifica codice
+        run: python -m unittest discover -s tests -q
+
+      - name: Verifica configurazione Google Sheets
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          PUBLISH_ONLY: ${{ inputs.publish_only }}
+        shell: bash
+        run: |
+          if [[ -n "$GOOGLE_SHEET_ID" || -n "$GOOGLE_SERVICE_ACCOUNT_JSON" || "$PUBLISH_ONLY" == 'true' ]]; then
+            python -u sheets_sync.py --check
+          else
+            echo 'Google Sheets non configurato: verrà prodotto solo Excel.'
+          fi
+
+      - name: Controlla importazione senza scraping
+        if: inputs.publish_only
+        env:
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          if [[ ! "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo 'Indica source_run_id: ID del run con un Excel completo.'
+            exit 1
+          fi
+
+      - name: Recupera Excel completo precedente
+        id: download
+        if: inputs.publish_only
+        uses: actions/download-artifact@v4
+        with:
+          name: Buylist-Pokemon-Excel
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.source_run_id }}
+          path: .
+
+      - name: Installa Chromium
+        if: ${{ !inputs.publish_only }}
+        run: |
           python -m playwright install --with-deps chromium
 
       - name: Esegui lo scraper
+        id: scrape
+        if: ${{ !inputs.publish_only }}
         shell: bash
         run: python -u scraper.py 2>&1 | tee scrape.log
 
+      - name: Importa automaticamente in Google Sheets
+        id: sheets
+        if: env.GOOGLE_SHEET_ID != ''
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        shell: bash
+        run: python -u sheets_sync.py 2>&1 | tee sheets.log
+
       - name: Carica Excel completo
-        if: success()
+        if: always() && (steps.scrape.outcome == 'success' || steps.download.outcome == 'success')
         uses: actions/upload-artifact@v4
         with:
           name: Buylist-Pokemon-Excel
@@ -48,6 +109,7 @@ jobs:
           name: Buylist-Pokemon-Diagnostica
           path: |
             scrape.log
+            sheets.log
             *.checkpoint.jsonl
             *_PARZIALE.xlsx
             *.errore.json
