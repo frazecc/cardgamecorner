@@ -1,7 +1,7 @@
 name: Estrai Buylist CardGameCorner
 
 on:
-  workflow_dispatch: # Ti permette di avviarlo manualmente con un clic
+  workflow_dispatch:
 
 jobs:
   run-scraper:
@@ -28,4 +28,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Buylist-Pokemon-Excel
-          path: CardGameCorner_Buylist_Completa.xlsx
+          path: CardGameCorner_Buylist_Pokemon_Completa.xlsx
