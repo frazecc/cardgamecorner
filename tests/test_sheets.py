@@ -200,6 +200,27 @@ class GoogleSheetsTests(unittest.TestCase):
                 self.client(memory).publish(sample_tables())
         self.assertEqual(memory.sheets, original)
 
+    def test_partial_publish_uses_separate_tabs_and_keeps_complete_data(self):
+        memory = MemorySheets()
+        client = self.client(memory)
+        client.publish(sample_tables())
+        previous = copy.deepcopy(memory.sheets)
+        partial = sample_tables()
+        partial['Info'][1][1] = 'PARZIALE'
+        client.publish(partial, prefix='CGC_PARZIALE_')
+        for key, value in previous.items():
+            self.assertEqual(memory.sheets[key], value)
+        self.assertTrue(any(s['properties']['title'] == 'CGC_PARZIALE_Prezzi' for s in memory.sheets.values()))
+
+    def test_partial_cannot_replace_complete_tabs(self):
+        memory = MemorySheets()
+        original = copy.deepcopy(memory.sheets)
+        partial = sample_tables()
+        partial['Info'][1][1] = 'PARZIALE'
+        with self.assertRaisesRegex(sync.SheetsError, 'CGC_PARZIALE_'):
+            self.client(memory).publish(partial)
+        self.assertEqual(memory.sheets, original)
+
     def test_utf8_chunks_respect_byte_limit_and_preserve_order(self):
         rows = [['€日本語' * 5, str(i)] for i in range(10)]
         blocks = list(sync.chunks(rows, max_bytes=200, max_rows=3))
@@ -231,6 +252,8 @@ class GoogleSheetsTests(unittest.TestCase):
             scraper.save_excel(path, records, [], False, queries_log=queries)
             with self.assertRaisesRegex(sync.SheetsError, 'COMPLETA'):
                 sync.load_tables(path)
+            partial_tables = sync.load_tables(path, allow_partial=True)
+            self.assertEqual(len(partial_tables['Prezzi']) - 1, len(scraper.price_rows(records)))
 
 
 if __name__ == '__main__':

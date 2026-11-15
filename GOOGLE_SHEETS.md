@@ -2,7 +2,8 @@
 
 Lo scraper continua a raccogliere tutta la buylist Pokémon con tutte le voci
 Variants di ogni carta. Al termine di una scansione COMPLETA il workflow importa
-automaticamente i dati nel tuo documento Google Sheets.
+automaticamente i dati nel tuo documento Google Sheets. In caso di errore tenta
+anche l’importazione dei dati raccolti in schede CGC_PARZIALE_ separate.
 
 La connessione di Google Drive a ChatGPT non è necessaria per questa modalità:
 lo script in GitHub Actions si autentica direttamente alla Google Sheets API.
@@ -60,7 +61,8 @@ scansione. Per produrre soltanto Excel in locale usa python scraper.py.
 Crea e gestisce quattro schede:
 
 - CGC_Prezzi: tutte le varianti, lingue, condizioni, foil e prime edizioni;
-  prezzi buylist e crediti numerici separati; inclusi prezzi zero, esclusioni
+  prezzi buylist e crediti numerici separati; Chiave voce univoca e segnalazione
+  degli ID del sito ripetuti; inclusi prezzi zero, esclusioni
   e valutazioni su richiesta.
 - CGC_Carte: anagrafica e conteggi delle varianti.
 - CGC_Info: fonte, copertura, conteggi e data dell'importazione.
@@ -83,8 +85,10 @@ quando la connessione lo consente. Una risposta persa dopo la pubblicazione vien
 verificata tramite un ID di importazione, evitando di duplicare le righe.
 
 L'Excel completo rimane disponibile nell'artifact Buylist-Pokemon-Excel anche se
-la pubblicazione Google fallisce. Il file PARZIALE non viene pubblicato come
-completo. Dati_originali e il JSONL restano negli artifact per evitare di occupare
+la pubblicazione Google fallisce. Se lo scraper si interrompe dopo avere raccolto dei dati, il workflow tenta
+anche l'importazione del file PARZIALE in quattro schede CGC_PARZIALE_ separate.
+Non sostituisce il risultato completo nelle schede CGC_. Lo stato PARZIALE e
+l'errore restano nel relativo foglio Info. Dati_originali e il JSONL restano negli artifact per evitare di occupare
 inutilmente celle Google. Nessun prezzo o lingua viene escluso da CGC_Prezzi.
 
 ## Ripetere SOLO l'importazione senza rifare la scansione
@@ -96,7 +100,13 @@ che trovi nell'URL /actions/runs/NUMERO dell'esecuzione con un Excel completo.
 Il workflow scarica l'artifact Buylist-Pokemon-Excel di quel run e lo importa,
 senza avviare Chromium o visitare di nuovo CardGameCorner. Funziona finché
 l'artifact è disponibile. L'Excel deve provenire dalla versione 4.0 o successiva
-ed essere completo, con tutti i conteggi coerenti.
+con tutti i conteggi coerenti. Per recuperare un PARZIALE abilita anche
+partial_data: il workflow scarica Buylist-Pokemon-Diagnostica invece dell'Excel
+completo e scrive nelle schede CGC_PARZIALE_.
+
+Per recuperare il run 43728814267 usa publish_only=true, partial_data=true,
+source_run_id=43728814267. Sono disponibili 2.426 carte e 13.576 voci prezzo
+nel parziale: non è la buylist completa.
 
 ## Uso locale
 

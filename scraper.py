@@ -26,13 +26,15 @@ from playwright.sync_api import sync_playwright
 
 URL = "https://www.cardgamecorner.com/it/buylist-2026?game=pokemon"
 OUTPUT = "CardGameCorner_Buylist_Pokemon_Completa.xlsx"
-VERSION = "5.0.1"
+VERSION = "5.1.0"
 MORE = 'button[ng-click="showMore()"]'
 PRODUCT = '[ng-repeat="product in expansion.Products"]'
 
 # Legge gli stessi oggetti usati dai template Angular della pagina. Non inventa
 # endpoint o selettori di prezzo e non interpreta div generici contenenti euro.
 READ_STATE = r"""(options = {}) => {
+    // Playwright passa null quando evaluate non riceve un argomento Python.
+    options = options || {};
     const input = document.querySelector('#simplesearch');
     if (!input || !window.angular) return null;
     const scope = angular.element(input).scope();
@@ -254,6 +256,15 @@ def validate_state(state, edition=None):
 VARIANT_DIMENSIONS = ('Language', 'Condition', 'Foil', 'FirstEdition')
 
 
+def variant_signature(variant):
+    """Contenuto completo della voce fonte: l'ID del sito non è sempre unico."""
+    return json.dumps(variant, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False)
+
+
+def variant_group(variant):
+    return (str(variant['IdProduct']), *(variant[field] for field in VARIANT_DIMENSIONS))
+
+
 def parse_variants(row):
     """Legge i prezzi originali, senza calcoli per condizione o lingua."""
     value = row['product'].get('Variants')
@@ -282,9 +293,9 @@ def parse_variants(row):
                 raise RuntimeError(f"Prezzo {field} non valido: {variant['IdProduct']}")
         if any(not isinstance(variant[field], bool) for field in ('Evaluation', 'NoBuyList')):
             raise RuntimeError(f"Stato variante non valido: {variant['IdProduct']}")
-        key = str(variant['IdProduct'])
-        if key in unique and unique[key] != variant:
-            raise RuntimeError(f'ID variante duplicato con dati diversi: {key}')
+        # Conserva entrambe le voci se il sito riutilizza IdProduct con dati
+        # diversi. Collassa soltanto ripetizioni identiche dell'intera voce.
+        key = variant_signature(variant)
         unique[key] = variant
     return list(unique.values())
 
@@ -296,23 +307,29 @@ def merge_product_row(old, row):
         return row
     if (old['image'], old['name']) != (row['image'], row['name']):
         raise RuntimeError(f'Identificatore ambiguo: {product_key(row)}. Nessuna fusione automatica.')
-    merged = {str(v['IdProduct']): v for v in parse_variants(old)}
+    merged = {}
+    for variant in parse_variants(old):
+        merged.setdefault(variant_group(variant), []).append(variant)
+    latest = {}
     for variant in current:
-        key = str(variant['IdProduct'])
-        previous = merged.get(key)
-        if previous and any(previous[field] != variant[field] for field in VARIANT_DIMENSIONS):
-            raise RuntimeError(f'ID variante con lingua/condizione/edizione diversa: {key}')
-        # Se il prezzo cambia durante la scansione conserva l'ultima osservazione.
-        merged[key] = variant
+        latest.setdefault(variant_group(variant), []).append(variant)
+    # Per un gruppo già incontrato conserva TUTTE le voci dell'ultima
+    # osservazione, compresi eventuali ID ripetuti con prezzi diversi.
+    merged.update(latest)
     result = dict(row, product=dict(row['product']))
-    result['product']['Variants'] = json.dumps(list(merged.values()), ensure_ascii=False)
+    result['product']['Variants'] = json.dumps([v for group in merged.values() for v in group], ensure_ascii=False)
     return result
 
 
 def price_rows(records):
     prices = []
     for key, row in records.items():
-        for variant in parse_variants(row):
+        variants = parse_variants(row)
+        id_counts = {}
+        for variant in variants:
+            ident = str(variant['IdProduct'])
+            id_counts[ident] = id_counts.get(ident, 0) + 1
+        for variant in variants:
             if variant['NoBuyList']:
                 status = 'ESCLUSA DALLA BUYLIST'
             elif variant['Evaluation']:
@@ -339,6 +356,10 @@ def price_rows(records):
                 'BuyListLock (dato sito)': variant.get('BuyListLock'),
                 'Quantità (dato sito)': variant.get('Quantity'),
                 'Immagine': row['image'],
+                'Chiave voce': key + '|' + str(variant['IdProduct']) + '|' +
+                    hashlib.sha256(variant_signature(variant).encode('utf-8')).hexdigest(),
+                'ID ripetuto nella carta': id_counts[str(variant['IdProduct'])] > 1,
+                'Voci con stesso ID': id_counts[str(variant['IdProduct'])],
             })
     return prices
 
@@ -377,7 +398,8 @@ def save_excel(path, records, pages_log, complete, error='', queries_log=None):
         {'Voce': 'Prezzi', 'Valore': 'Tutte le voci Variants pubblicate: BuyList e Credit originali per lingua, condizione, foil e prima edizione. Nessun moltiplicatore o combinazione inventata.'},
         {'Voce': 'Codici condizione', 'Valore': 'NM/M = Near Mint; SP = Excellent; HP = Heavily Played; D = Poor/Damaged (etichette dei selettori del sito).'},
         {'Voce': 'Righe senza prezzo', 'Valore': 'Conservate anche valutazioni su richiesta, esclusioni e prezzi zero. Zero non è una quotazione positiva.'},
-        {'Voce': 'ID variante', 'Valore': 'Ogni IdProduct resta distinto, anche con uguale lingua/condizione. Se ritrovato con gli stessi attributi, si conserva il prezzo dell’ultima osservazione.'},
+        {'Voce': 'ID variante', 'Valore': 'IdProduct può essere ripetuto nel sito. Le voci con dati diversi restano separate con Chiave voce univoca e segnalazione ID ripetuto. Non sono necessariamente varianti fisiche diverse.'},
+        {'Voce': 'Aggiornamenti prezzi', 'Valore': 'Per lo stesso ID/lingua/condizione/foil/prima edizione conserva tutte le voci dell’ultima osservazione; non aggiunge i prezzi precedenti come nuove quotazioni.'},
         {'Voce': 'Copertura', 'Valore': 'Ricerca generale e ricerca separata per ogni espansione disponibile; tutte le pagine di ciascuna ricerca.'},
         {'Voce': 'Errore', 'Valore': error},
     ]
@@ -408,6 +430,7 @@ def scrape(output, timeout=120, headed=False, partial_interval=900, load_images=
     partial = output.with_name(output.stem.replace('_Completa', '') + '_PARZIALE.xlsx')
     checkpoint = output.with_suffix('.checkpoint.jsonl')
     records, log, queries_log = {}, [], []
+    last_row = None
     last_partial = time.monotonic()
     print(f'CardGameCorner scraper {VERSION} | {URL}', flush=True)
     with sync_playwright() as playwright:
@@ -484,6 +507,7 @@ def scrape(output, timeout=120, headed=False, partial_interval=900, load_images=
                             raise RuntimeError('Paginazione cambiata o non consecutiva. Risultato parziale.')
                         new_rows, updated_rows, new_local = [], [], 0
                         for row in state['rows']:
+                            last_row = row
                             if not row['name']:
                                 raise RuntimeError('Template di una carta non ancora caricato.')
                             key = product_key(row)
@@ -557,6 +581,8 @@ def scrape(output, timeout=120, headed=False, partial_interval=900, load_images=
             diagnostic = {'version': VERSION, 'url': URL, 'error': str(exc),
                           'cards': len(records), 'queries': queries_log,
                           'timestamp_utc': datetime.now(timezone.utc).isoformat()}
+            if last_row is not None:
+                diagnostic['last_row'] = last_row
             diagnostic['network'] = {
                 'successful_responses': page._buylist_monitor.successful_responses,
                 'successful_json': page._buylist_monitor.successful_json,

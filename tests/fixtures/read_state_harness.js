@@ -27,3 +27,6 @@ if(variantReads!==0)throw Error('Probe reads variants');
 const full=read({seen:[probe.all_keys[0]]});
 if(variantReads!==1 || full.rows.length!==source.length-1 || full.all_keys.length!==source.length)throw Error('Projection wrong');
 console.log('JS reale READ_STATE: probe senza Variants, snapshot completo solo per carte nuove.');
+
+const diagnostic=read(null);
+if(diagnostic.rows.length!==source.length)throw Error("Null argument broke diagnostics");

@@ -61,7 +61,7 @@ def cell_value(value):
     return value
 
 
-def load_tables(path):
+def load_tables(path, allow_partial=False):
     """Legge solo i fogli utili a Sheets, conserva tutte le righe Prezzi."""
     with_workbook = load_workbook(path, read_only=True, data_only=False)
     try:
@@ -80,23 +80,28 @@ def load_tables(path):
                 raise SheetsError(f'Foglio {name} senza intestazioni.')
             tables[name] = rows
         info = {row[0]: row[1] for row in tables['Info'][1:] if len(row) >= 2}
-        if not str(info.get('Stato', '')).startswith('COMPLETO:') or info.get('Fonte') != SOURCE_URL:
+        complete = str(info.get('Stato', '')).startswith('COMPLETO:')
+        partial = info.get('Stato') == 'PARZIALE'
+        if (not complete and not (allow_partial and partial)) or info.get('Fonte') != SOURCE_URL:
             raise SheetsError('Importazione rifiutata: il file non è una buylist COMPLETA dello scraper.')
         if int(info.get('Varianti nel foglio Prezzi', -1)) != len(tables['Prezzi']) - 1:
             raise SheetsError('Conteggio varianti diverso dalle righe Prezzi.')
         if int(info.get('Carte distinte', -1)) != len(tables['Carte']) - 1:
             raise SheetsError('Conteggio carte diverso dalle righe Carte.')
         status_index = tables['Espansioni'][0].index('Stato')
-        if (int(info.get('Ricerche completate', -1)) != len(tables['Espansioni']) - 1
-                or any(row[status_index] != 'COMPLETATA' for row in tables['Espansioni'][1:])):
+        query_rows = tables['Espansioni'][1:]
+        if int(info.get('Ricerche completate', -1)) != sum(row[status_index] == 'COMPLETATA' for row in query_rows):
+            raise SheetsError('Conteggio ricerche completate incoerente nell’Excel.')
+        if complete and any(row[status_index] != 'COMPLETATA' for row in query_rows):
             raise SheetsError('Non tutte le ricerche risultano completate nell’Excel.')
         seen = set()
         headers = tables['Prezzi'][0]
         a, b = headers.index('ID carta'), headers.index('ID variante')
+        entry_index = headers.index('Chiave voce') if 'Chiave voce' in headers else None
         for row in tables['Prezzi'][1:]:
-            key = (row[a], row[b])
-            if not all(key) or key in seen:
-                raise SheetsError('Identificatore carta/variante mancante o duplicato.')
+            key = (row[a], row[entry_index]) if entry_index is not None else (row[a], row[b])
+            if not row[a] or not row[b] or not all(key) or key in seen:
+                raise SheetsError('Chiave voce mancante o duplicata nel foglio Prezzi.')
             seen.add(key)
         return tables
     finally:
@@ -195,13 +200,19 @@ class SheetsClient:
             if normalized(padded) != normalized(block):
                 raise SheetsError(f'Verifica dati fallita per {title}, riga {start}.')
 
-    def published(self, run_id):
-        address = "'CGC_Info'!A:B"
+    def published(self, run_id, prefix='CGC_'):
+        address = "'" + prefix + "Info'!A:B"
         result = self.request('GET', '/values/' + quote(address, safe=''),
                               params={'valueRenderOption': 'UNFORMATTED_VALUE'})
         return any(row == ['ID importazione', run_id] for row in result.get('values', []))
 
-    def publish(self, original_tables):
+    def publish(self, original_tables, prefix='CGC_'):
+        if prefix not in ('CGC_', 'CGC_PARZIALE_'):
+            raise SheetsError('Prefisso di destinazione non autorizzato.')
+        source_info = {row[0]: row[1] for row in original_tables['Info'][1:] if len(row) >= 2}
+        is_partial = source_info.get('Stato') == 'PARZIALE'
+        if is_partial != (prefix == 'CGC_PARZIALE_'):
+            raise SheetsError('Un risultato parziale deve usare esclusivamente le schede CGC_PARZIALE_.')
         run_id = secrets.token_hex(8)
         tables = {name: [list(row) for row in original_tables[name]] for name in TABLES}
         tables['Info'].extend([['ID importazione', run_id],
@@ -231,7 +242,7 @@ class SheetsClient:
                             s['properties'].get('gridProperties', {}).get('columnCount', 0) for s in sheets)
         stage_cells, target_growth = 0, 0
         for name, rows in tables.items():
-            title = 'CGC_' + name
+            title = prefix + name
             old = existing.get(title)
             if old and not managed(old):
                 raise SheetsError(f'La scheda {title} esiste ma non appartiene a questo importatore. Rinominala prima di procedere.')
@@ -303,9 +314,9 @@ class SheetsClient:
             except SheetsError:
                 # Il batch finale è atomico. Se la risposta si perde, il marker
                 # distingue una pubblicazione riuscita da un batch non confermato.
-                if not self.published(run_id):
+                if not self.published(run_id, prefix):
                     raise
-            if not self.published(run_id):
+            if not self.published(run_id, prefix):
                 raise SheetsError('Pubblicazione Google Sheets non confermata dal marker finale.')
         except Exception:
             # Rimuove esclusivamente i temporanei marcati di questa importazione.
@@ -320,7 +331,8 @@ class SheetsClient:
             except Exception:
                 pass
             raise
-        print(f'IMPORTAZIONE GOOGLE SHEETS COMPLETATA: {len(tables["Prezzi"]) - 1} varianti.', flush=True)
+        kind = ' PARZIALE' if prefix == 'CGC_PARZIALE_' else ''
+        print(f'IMPORTAZIONE GOOGLE SHEETS{kind} COMPLETATA: {len(tables["Prezzi"]) - 1} voci.', flush=True)
 
 
 def authenticated_session():
@@ -352,18 +364,21 @@ def main():
     parser.add_argument('--input', default='CardGameCorner_Buylist_Pokemon_Completa.xlsx')
     parser.add_argument('--spreadsheet-id', default=os.environ.get('GOOGLE_SHEET_ID', '').strip() or DEFAULT_SPREADSHEET_ID)
     parser.add_argument('--check', action='store_true', help='Verifica credenziali e accesso, senza modificare il foglio')
+    parser.add_argument('--partial', action='store_true', help='Consente un file parziale, usando schede CGC_PARZIALE_ separate')
     args = parser.parse_args()
     try:
         sheet_id = spreadsheet_id(args.spreadsheet_id)
         # Valida l'Excel prima di autenticare se si sta importando.
-        tables = None if args.check else load_tables(Path(args.input))
+        tables = None if args.check else load_tables(Path(args.input), allow_partial=args.partial)
         with authenticated_session() as session:
             client = SheetsClient(sheet_id, session)
             if args.check:
                 client.metadata()
                 print('Google Sheets: credenziali e lettura del documento verificate.', flush=True)
             else:
-                client.publish(tables)
+                info = {row[0]: row[1] for row in tables['Info'][1:] if len(row) >= 2}
+                prefix = 'CGC_PARZIALE_' if info.get('Stato') == 'PARZIALE' else 'CGC_'
+                client.publish(tables, prefix=prefix)
     except (SheetsError, OSError, ValueError) as exc:
         print(f'IMPORTAZIONE GOOGLE SHEETS INTERROTTA: {exc}', file=sys.stderr, flush=True)
         return 1

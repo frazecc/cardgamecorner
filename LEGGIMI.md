@@ -1,4 +1,4 @@
-# CardGameCorner Buylist Pokémon — versione 5.0.1
+# CardGameCorner Buylist Pokémon — versione 5.1.0
 
 Aggiorna scraper.py, sheets_sync.py, requirements.txt, tests/ e
 .github/workflows/scrape.yml mantenendo i percorsi e avvia un NUOVO Run workflow.
@@ -10,7 +10,8 @@ IMPORT CGC è già selezionato con l'ID fornito. Leggi GOOGLE_SHEETS.md per
 aggiungere il solo Secret GOOGLE_SERVICE_ACCOUNT_JSON e condividere il documento
 con il relativo account di servizio: l'importazione sarà automatica al termine della scansione. Quattro schede
 CGC_ ricevono dati verificati in blocchi, senza modificare le altre schede.
-Un Excel parziale non sostituisce il risultato completo nel documento.
+In caso di errore, l'Excel parziale viene importato nelle schede CGC_PARZIALE_,
+che restano separate dalle schede CGC_ contenenti il risultato completo.
 
 La versione 5 controlla il caricamento con dati leggeri, trasferisce il JSON solo
 per le nuove carte, evita immagini/font/video e riscrive meno spesso il parziale.
@@ -36,8 +37,10 @@ righe distinte anche quando lingua, condizione ed edizione coincidono.
 
 La stessa carta può comparire in più ricerche: le varianti si uniscono per ID,
 senza perdere quelle viste in precedenza. Per lo stesso ID e gli stessi attributi
-si conserva l'ultimo prezzo osservato. Cambiamenti di lingua/condizione/foil/prima
-edizione sotto lo stesso ID fanno interrompere l'esportazione. Dati Variants
+si conserva l'ultima osservazione, mantenendo anche più voci diverse nella stessa
+risposta. ID ripetuti con dati diversi restano separati: la colonna Chiave voce
+li distingue e ID ripetuto nella carta li segnala. Non significa necessariamente
+che siano varianti fisiche diverse. Dati Variants
 mancanti, JSON illeggibile o prezzi non validi non vengono ignorati.
 
 Il foglio Carte contiene l'anagrafica e i conteggi delle varianti. Pagine ed
@@ -68,13 +71,13 @@ una nuova esecuzione riparte dall'inizio.
 
 ## Verifiche
 
-- 42 test automatici, compresi il timeout reale e la gestione delle varianti.
+- 50 test automatici, compresi il timeout reale e la gestione delle varianti.
 - Estrazione verificata sul checkpoint reale: 2.165 carte, 11.519 varianti.
 - Esportazione e rilettura Excel: verificati tutti gli ID, le lingue, le condizioni,
   i prezzi buylist e i crediti delle 11.519 varianti, senza differenze.
 - Confronto sul sito: Charizard, Italiano, Excellent, First Edition mostra
   BuyList 1879.95 e Credit 2519.95, come nei dati Variants.
-- La scansione completa di tutte le espansioni con la versione 5.0.1 deve ancora
+- La scansione completa di tutte le espansioni con la versione 5.1.0 deve ancora
   terminare su GitHub Actions. I numeri sopra si riferiscono al parziale reale.
 
 Per ripetere i test dalla radice del pacchetto:
@@ -93,3 +96,32 @@ Timeout per pagina: python scraper.py --timeout 180
 Non serve un account. Non vengono aggiunte carte al carrello.
 
 I test Google Sheets usano un modello API per verificare blocchi, quote, risposta persa, rifiuto dei parziali, pubblicazioni ripetute e conservazione delle schede precedenti. Non attestano una pubblicazione nel tuo account senza configurazione.
+
+
+## Correzione 5.1.0 e recupero dei dati già raccolti
+
+Il run GitHub 43728814267, versione 5.0.1, si è interrotto in Base con:
+ID variante duplicato con dati diversi: 1032429. Il controllo aggiunto era troppo
+restrittivo: ora conserva le voci diverse, senza scegliere o scartare un prezzo.
+Solo le ripetizioni identiche dell'intera voce vengono collassate.
+
+Corretta anche la diagnostica READ_STATE: Playwright passa null quando manca
+l'argomento, perciò il default JavaScript da solo non bastava. Ora accetta null
+e salva anche l'ultima riga elaborata. Il run originale non ha salvato il payload
+della riga duplicata: i test usano coppie sintetiche con lo stesso ID per coprire
+prezzi, condizioni, lingue e altri campi diversi, senza attribuire al caso reale
+una differenza che non è stata osservata.
+
+50 test superati. Verificata la lettura del parziale reale: 2.426 carte e 13.576
+voci prezzo. Il controllo Google di quel run ha verificato autenticazione e
+lettura; la scrittura effettiva rimane da verificare sul tuo account.
+
+Per importare subito quel parziale, dopo avere caricato TUTTO questo pacchetto,
+apri Actions > Estrai Buylist CardGameCorner > Run workflow e imposta:
+
+- publish_only: attivo
+- partial_data: attivo
+- source_run_id: 43728814267
+
+Il risultato comparirà in CGC_PARZIALE_Prezzi e nelle altre schede CGC_PARZIALE_.
+Per una nuova scansione completa lascia publish_only e partial_data disattivati.

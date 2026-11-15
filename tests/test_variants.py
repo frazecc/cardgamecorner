@@ -53,13 +53,18 @@ class VariantTests(unittest.TestCase):
         self.assertEqual(len(result), len(self.variants))
         self.assertEqual(result[0]['BuyList'], 123.45)
 
-    def test_does_not_merge_conflicting_dimensions(self):
+    def test_keeps_same_id_with_different_dimensions_as_separate_entries(self):
         new = copy.deepcopy(self.row)
         changed = copy.deepcopy(self.variants[:1])
         changed[0]['Language'] = 'Japanese'
         new['product']['Variants'] = changed
-        with self.assertRaisesRegex(RuntimeError, 'diversa'):
-            scraper.merge_product_row(self.row, new)
+        merged = scraper.merge_product_row(self.row, new)
+        self.assertEqual(len(scraper.parse_variants(merged)), len(self.variants) + 1)
+        prices = scraper.price_rows({'card': merged})
+        self.assertTrue(any(p['Lingua'] == 'Japanese' for p in prices))
+        repeated = [p for p in prices if p['ID variante'] == str(changed[0]['IdProduct'])]
+        self.assertEqual(len(repeated), 2)
+        self.assertTrue(all(p['ID ripetuto nella carta'] for p in repeated))
 
     def test_bad_or_missing_variants_stop_export(self):
         for data in (None, '{broken', {}, [{'IdProduct': 1}]):
