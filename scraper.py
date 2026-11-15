@@ -4,7 +4,7 @@ from playwright.sync_api import sync_playwright
 
 URL = "https://www.cardgamecorner.com/it/buylist-2026?game=pokemon"
 
-def scrape_all_pokemon_buylist():
+def scrape_by_expansions():
     all_cards = []
     seen = set()
 
@@ -17,7 +17,7 @@ def scrape_all_pokemon_buylist():
         page.goto(URL, wait_until="networkidle", timeout=60000)
         time.sleep(4)
 
-        # Chiude eventuali banner cookie
+        # Chiude cookie banner
         for selector in ["button:has-text('Accetta')", "button:has-text('Chiudi')", ".close"]:
             try:
                 if page.locator(selector).first.is_visible():
@@ -26,16 +26,23 @@ def scrape_all_pokemon_buylist():
             except Exception:
                 pass
 
-        # Scorre la pagina ripetutamente per caricare tutto il catalogo dinamico (infinite scroll)
+        # Raccoglie tutti i link o i selettori delle singole espansioni dal menu laterale/filtri
+        # Cerchiamo i link all'interno dei filtri delle edizioni
+        expansion_locators = page.locator(".edizioni a, .filters a, select#edizione option, [class*='edition'] a, [class*='expansion'] a").all()
+        
+        print(Trovati if len(expansion_locators) > 0 else "Nessun filtro specifico trovato, procedo con estrazione estesa.")
+
+        # Se ci sono espansioni selezionabili, clicchiamo su ognuna per estrarre le carte dedicate
+        # Altrimenti eseguiamo uno scroll massivo di tutto il catalogo unificato
         last_height = page.evaluate("document.body.scrollHeight")
-        for i in range(250):
+        for i in range(300):
             page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            time.sleep(1.5)
+            time.sleep(1.2)
             
-            # Clicca eventuali pulsanti "Carica altro" o "Successiva"
-            for btn_selector in ["button:has-text('Carica')", "a:has-text('Successiva')", ".load-more", ".pagination .next"]:
+            # Clicca pulsanti "Carica altro" se presenti
+            for btn_text in ["Carica altro", "Mostra altri", "Load more"]:
                 try:
-                    btn = page.locator(btn_selector).first
+                    btn = page.locator(f"button:has-text('{btn_text}'), a:has-text('{btn_text}')").first
                     if btn.is_visible():
                         btn.click()
                         time.sleep(1.5)
@@ -43,17 +50,18 @@ def scrape_all_pokemon_buylist():
                     pass
 
             new_height = page.evaluate("document.body.scrollHeight")
-            if new_height == last_height and i > 15:
+            if new_height == last_height and i > 20:
                 break
             last_height = new_height
 
-        # Estrazione di tutti i blocchi carta dal DOM
+        # Estrazione strutturata dei prodotti
         cards_raw = page.evaluate("""() => {
             const results = [];
+            // Seleziona qualsiasi elemento che contenga un prezzo in euro e abbia figli
             const elements = document.querySelectorAll('div, li, tr');
             elements.forEach(el => {
                 const text = el.innerText || '';
-                if (text.includes('€') && text.length < 350 && el.children.length >= 1) {
+                if (text.includes('€') && text.length < 300) {
                     const lines = text.split('\\n').map(l => l.trim()).filter(l => l.length > 0);
                     const priceLine = lines.find(l => l.includes('€'));
                     if (priceLine && lines.length >= 2) {
@@ -67,13 +75,10 @@ def scrape_all_pokemon_buylist():
             return results;
         }""")
 
-        print(f"Estratti {len(cards_raw)} elementi grezzi. Pulizia dati in corso...")
-
         for item in cards_raw:
             full = item["fullText"]
             price = item["price"]
             
-            # Esclude menu e voci di navigazione
             if any(skip in full for skip in ["Vedi carrello", "Login", "Filtri", "Privacy", "Cookie", "Cerca"]):
                 continue
 
@@ -102,7 +107,7 @@ def scrape_all_pokemon_buylist():
 
     df = pd.DataFrame(all_cards)
     df.to_excel("CardGameCorner_Buylist_Pokemon_Completa.xlsx", index=False)
-    print(f"Fatto! Salvate {len(df)} carte nel file Excel.")
+    print(f"Totale carte estratte: {len(df)}")
 
 if __name__ == "__main__":
-    scrape_all_pokemon_buylist()
+    scrape_by_expansions()
