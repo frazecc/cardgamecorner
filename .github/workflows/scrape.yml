@@ -3,9 +3,17 @@ name: Estrai Buylist CardGameCorner
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: cardgamecorner-buylist-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   run-scraper:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -17,15 +25,32 @@ jobs:
 
       - name: Installa dipendenze
         run: |
-          pip install playwright pandas openpyxl
-          playwright install chromium
-          playwright install-deps
+          python -m pip install 'playwright>=1.48,<2' 'pandas>=2.2,<4' 'openpyxl>=3.1,<4'
+          python -m playwright install --with-deps chromium
 
       - name: Esegui lo scraper
-        run: python scraper.py
+        shell: bash
+        run: python -u scraper.py 2>&1 | tee scrape.log
 
-      - name: Carica il file Excel nei risultati
+      - name: Carica Excel completo
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: Buylist-Pokemon-Excel
           path: CardGameCorner_Buylist_Pokemon_Completa.xlsx
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Conserva log e risultati parziali
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Buylist-Pokemon-Diagnostica
+          path: |
+            scrape.log
+            *.checkpoint.jsonl
+            *_PARZIALE.xlsx
+            *.errore.json
+            *.errore.png
+          if-no-files-found: warn
+          retention-days: 14
