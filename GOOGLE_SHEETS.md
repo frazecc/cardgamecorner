@@ -1,3 +1,48 @@
+# Google Sheets — backup progressivo della versione 6
+
+La destinazione IMPORT CGC e le credenziali già configurate restano valide.
+Con il nuovo workflow la raccolta viene salvata durante lo scraping in:
+
+- CGC_LIVE_Prezzi: prezzi di tutte le lingue, condizioni e varianti raccolte;
+- CGC_LIVE_Info: stato IN CORSO, PARZIALE oppure COMPLETO e conteggi confermati.
+
+Normalmente vengono inviate 50 carte per blocco, con tutte le loro varianti.
+Il thread tenta l'invio anche dopo 30 secondi con un blocco incompleto. Le
+richieste rispettano la pausa configurata e vengono verificate confrontando
+l'eco dei valori del server, senza aggiungere una richiesta di lettura per carta.
+
+Il checkpoint locale è scritto e sincronizzato su disco dopo ogni pagina.
+Se Google si interrompe, lo scraper continua a raccogliere dati. Se la raccolta
+si ferma, il thread prova a svuotare la coda e indica PARZIALE. Solo quando tutti
+i conteggi coincidono con il risultato locale dichiara COMPLETO.
+
+Con backup live riuscito non serve la vecchia copia finale di milioni di celle:
+il risultato aggiornato è già in CGC_LIVE_Prezzi. Il file Excel completo continua
+ad essere caricato negli artifact. Se il live fallisce, il workflow tenta la
+precedente importazione da Excel come recupero. publish_only resta disponibile
+per recuperare vecchi file nelle schede CGC_ o CGC_PARZIALE_.
+
+Ad ogni nuovo run viene creata una nuova coppia CGC_LIVE_. La coppia precedente
+viene nascosta come CGC_LIVE_PRECEDENTE_; la copia ancora più vecchia viene
+eliminata. Si conserva quindi una sola generazione precedente. I link gid e le
+formule che puntano alla vecchia coppia continueranno a puntare alla copia
+precedente: usa la coppia CGC_LIVE_ visibile per i dati correnti. Non mettere
+appunti o formule manuali nelle schede gestite dallo script.
+
+Aggiorna anche live_sheets.py e .github/workflows/scrape.yml. Non servono nuove
+chiavi o permessi Google se l'account di servizio ha già il ruolo Editor.
+
+Per riprendere la raccolta precedente: resume_scrape_run_id=43737659445,
+publish_only=false, partial_data=false. I dati del checkpoint vengono copiati
+in background mentre lo scraper completa le espansioni mancanti. Il backup
+può restare indietro rispetto alla raccolta e viene atteso prima della fine.
+
+74 test superati con API simulate; l'esecuzione live della nuova modalità è
+ancora da verificare. Una quota esaurita o un errore persistente del servizio
+può impedire il backup remoto: la copia locale non viene scartata.
+
+---
+
 # Collegamento a un Google Sheet esistente
 
 Lo scraper continua a raccogliere tutta la buylist Pokémon con tutte le voci
@@ -43,7 +88,7 @@ Il JSON contiene una chiave privata: inseriscilo solo nel Secret, senza caricarl
 nel repository pubblico o incollarlo nella chat. Non serve inviarlo a me.
 
 7. Aggiorna tutti i file dello ZIP nel repository mantenendo le cartelle:
-   scraper.py, sheets_sync.py, requirements.txt, tests/ e
+   scraper.py, sheets_sync.py, live_sheets.py, requirements.txt, tests/ e
    .github/workflows/scrape.yml. Le guide sono facoltative per l'esecuzione.
 8. In Actions > Estrai Buylist CardGameCorner > Run workflow lascia
    publish_only disattivato e avvia sul branch main.
@@ -104,9 +149,11 @@ con tutti i conteggi coerenti. Per recuperare un PARZIALE abilita anche
 partial_data: il workflow scarica Buylist-Pokemon-Diagnostica invece dell'Excel
 completo e scrive nelle schede CGC_PARZIALE_.
 
-Per recuperare il run 43728814267 usa publish_only=true, partial_data=true,
-source_run_id=43728814267. Sono disponibili 2.426 carte e 13.576 voci prezzo
-nel parziale: non è la buylist completa.
+Per recuperare il grande parziale del run 43737659445 usa publish_only=true,
+partial_data=true, source_run_id=43737659445. Sono disponibili 32.243 carte e
+216.762 voci prezzo nel parziale: non è ancora la buylist completa.
+Per FINIRE la raccolta usa invece resume_scrape_run_id=43737659445 e lascia
+publish_only disattivato.
 
 ## Uso locale
 
@@ -132,8 +179,11 @@ completo delle nuove carte una sola volta per pagina. Anche se Vedi altre carte
 mantiene tutte le carte precedenti nel DOM, queste non vengono rielaborate.
 
 Il JSONL viene aggiornato dopo ogni pagina. L'Excel parziale viene scritto ogni
-15 minuti e su errore, al posto di una riscrittura ogni dieci espansioni. È una
-copia diagnostica, non un sistema di ripresa automatica dello scraping.
+15 minuti e su errore, al posto di una riscrittura ogni dieci espansioni.
+Dalla 5.2 il giornale permette anche la ripresa esplicita: in Run workflow usa
+resume_scrape_run_id con l'ID del run interrotto e lascia publish_only spento.
+Solo le ricerche concluse vengono saltate; quella interrotta riparte da pagina 1.
+Per ripartire da capo lascia il campo vuoto.
 Per cambiare l'intervallo usa --partial-interval 300; 0 scrive Excel solo su
 errore e alla fine. Per scaricare anche le immagini usa --load-images.
 
@@ -152,3 +202,20 @@ I test del trasferimento usano un modello API e non credenziali del tuo account.
   https://developers.google.com/workspace/sheets/api/reference/rest/v4/ValueInputOption
 - Limiti del documento Google Sheets:
   https://support.google.com/drive/answer/37603
+
+
+## Errori temporanei nella pubblicazione finale
+
+La versione 5.2 controlla il marker e i temporanei dopo un HTTP 500/502/503/504,
+429 o una risposta persa. Se è provato che il batch finale non è stato applicato,
+può ripeterlo fino a tre volte usando i blocchi già caricati. Gli ID delle schede
+visibili vengono conservati. La cancellazione completa prima della copia è stata
+rimossa, perché il rettangolo viene già sovrascritto dalla copia stessa.
+
+La guida Google avverte che grandi aggiornamenti batch possono andare in timeout
+ed indica le riprove con backoff per gli errori temporanei:
+https://developers.google.com/workspace/sheets/api/troubleshoot-api-errors
+
+Per il run interrotto dopo 315 ricerche usa resume_scrape_run_id=43737659445.
+Per importarne solo il parziale usa invece publish_only=true, partial_data=true,
+source_run_id=43737659445. Non attivare insieme publish_only e la ripresa.

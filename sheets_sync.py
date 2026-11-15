@@ -33,7 +33,9 @@ MAX_PAYLOAD = 1_500_000
 
 
 class SheetsError(RuntimeError):
-    pass
+    def __init__(self, message, retryable=False):
+        super().__init__(message)
+        self.retryable = retryable
 
 
 def spreadsheet_id(value):
@@ -157,14 +159,15 @@ class SheetsClient:
                                                 params=params, timeout=(15, 180))
             except requests.exceptions.RequestException as exc:
                 if not retry or attempt == 5:
-                    raise SheetsError('Connessione Google Sheets non riuscita o risposta non confermata.') from exc
+                    raise SheetsError('Connessione Google Sheets non riuscita o risposta non confermata.', retryable=True) from exc
             else:
                 if 200 <= response.status_code < 300:
                     return response.json()
                 if not retry or response.status_code not in (429, 500, 502, 503, 504) or attempt == 5:
                     hints = {403: 'Abilita Sheets API e condividi il documento con il service account come Editor.',
                              404: 'Verifica ID del documento e accesso del service account.'}
-                    raise SheetsError(f'Google Sheets HTTP {response.status_code}. ' + hints.get(response.status_code, 'Importazione interrotta.'))
+                    raise SheetsError(f'Google Sheets HTTP {response.status_code}. ' + hints.get(response.status_code, 'Importazione interrotta.'),
+                                      retryable=response.status_code in (429, 500, 502, 503, 504))
             time.sleep(min(32, 2 ** attempt) + random.random())
         raise SheetsError('Tentativi Google Sheets esauriti.')
 
@@ -291,7 +294,9 @@ class SheetsClient:
                 # Cancella eventuali vecchie celle e copia nel MEDESIMO sheetId:
                 # link gid e formule in altre schede continuano a puntare qui.
                 publish.extend([
-                    {'updateCells': {'range': target_range, 'fields': 'userEnteredValue'}},
+                    # Il rettangolo viene sovrascritto interamente (anche celle
+                    # vuote); evitare una cancellazione di milioni di celle
+                    # immediatamente prima della copia dello stesso rettangolo.
                     {'copyPaste': {'source': source_range, 'destination': target_range, 'pasteType': 'PASTE_NORMAL'}},
                     {'updateSheetProperties': {'properties': {'sheetId': target_id,
                        'gridProperties': {'frozenRowCount': 1}}, 'fields': 'gridProperties.frozenRowCount'}},
@@ -309,13 +314,27 @@ class SheetsClient:
                             'cell': {'userEnteredFormat': {'numberFormat': {'type': 'NUMBER', 'pattern': '#,##0.00'}}},
                             'fields': 'userEnteredFormat.numberFormat'}})
             publish.extend({'deleteSheet': {'sheetId': sheet_id}} for _, sheet_id in stages.values())
-            try:
-                self.batch(publish)
-            except SheetsError:
-                # Il batch finale è atomico. Se la risposta si perde, il marker
-                # distingue una pubblicazione riuscita da un batch non confermato.
-                if not self.published(run_id, prefix):
-                    raise
+            print('Google Sheets: pubblico i dati verificati nelle schede visibili.', flush=True)
+            for attempt in range(3):
+                try:
+                    self.batch(publish)
+                    break
+                except SheetsError as exc:
+                    # Prima di ripetere controlla sia il marker sia i temporanei.
+                    # Il batch atomico elimina tutti i temporanei al successo:
+                    # se esistono ancora tutti, non è stato applicato.
+                    try:
+                        if self.published(run_id, prefix):
+                            break
+                    except SheetsError:
+                        pass
+                    observed = {s['properties']['sheetId']: s['properties']['title']
+                                for s in self.metadata().get('sheets', [])}
+                    not_applied = all(observed.get(sheet_id) == title for title, sheet_id in stages.values())
+                    if not exc.retryable or not not_applied or attempt == 2:
+                        raise
+                    print(f'Google Sheets: errore temporaneo alla pubblicazione; tentativo {attempt + 2}/3 senza ricaricare i blocchi.', flush=True)
+                    time.sleep(5 * (2 ** attempt))
             if not self.published(run_id, prefix):
                 raise SheetsError('Pubblicazione Google Sheets non confermata dal marker finale.')
         except Exception:

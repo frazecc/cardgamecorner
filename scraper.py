@@ -15,6 +15,8 @@ import argparse
 import hashlib
 import json
 import math
+import os
+import shutil
 import sys
 import time
 from datetime import datetime, timezone
@@ -26,7 +28,7 @@ from playwright.sync_api import sync_playwright
 
 URL = "https://www.cardgamecorner.com/it/buylist-2026?game=pokemon"
 OUTPUT = "CardGameCorner_Buylist_Pokemon_Completa.xlsx"
-VERSION = "5.1.0"
+VERSION = "6.0.0"
 MORE = 'button[ng-click="showMore()"]'
 PRODUCT = '[ng-repeat="product in expansion.Products"]'
 
@@ -262,7 +264,7 @@ def variant_signature(variant):
 
 
 def variant_group(variant):
-    return (str(variant['IdProduct']), *(variant[field] for field in VARIANT_DIMENSIONS))
+    return (str(variant['IdProduct']), *(variant.get(field) for field in VARIANT_DIMENSIONS))
 
 
 def parse_variants(row):
@@ -278,15 +280,13 @@ def parse_variants(row):
     for variant in variants:
         if not isinstance(variant, dict):
             raise RuntimeError(f"Variante non valida per {product_key(row)}")
-        required = ('IdProduct', *VARIANT_DIMENSIONS, 'BuyList', 'Credit', 'Evaluation', 'NoBuyList')
+        required = ('IdProduct', 'BuyList', 'Credit', 'Evaluation', 'NoBuyList')
         if any(field not in variant or variant[field] is None for field in required):
             raise RuntimeError(f"Campi variante mancanti per {product_key(row)}")
         if not str(variant['IdProduct']).strip():
             raise RuntimeError('ID variante vuoto.')
-        if any(not isinstance(variant[field], str) for field in VARIANT_DIMENSIONS):
+        if any(variant.get(field) is not None and not isinstance(variant[field], str) for field in VARIANT_DIMENSIONS):
             raise RuntimeError(f"Dimensioni variante non valide: {variant['IdProduct']}")
-        if not variant['Language'].strip() or not variant['Condition'].strip():
-            raise RuntimeError(f"Lingua/condizione assente: {variant['IdProduct']}")
         for field in ('BuyList', 'Credit'):
             number = variant[field]
             if isinstance(number, bool) or not isinstance(number, (int, float)) or not math.isfinite(number) or number < 0:
@@ -344,10 +344,10 @@ def price_rows(records):
                 'Carta': row['name'],
                 'Espansione': row['expansion'],
                 'Numero carta': row['product'].get('SerialNumber'),
-                'Lingua': variant['Language'],
-                'Condizione (codice sito)': variant['Condition'],
-                'Foil (dato sito)': variant['Foil'],
-                'Prima edizione (dato sito)': variant['FirstEdition'],
+                'Lingua': variant.get('Language') or '',
+                'Condizione (codice sito)': variant.get('Condition') or '',
+                'Foil (dato sito)': variant.get('Foil') or '',
+                'Prima edizione (dato sito)': variant.get('FirstEdition') or '',
                 'Prezzo buylist (€)': variant['BuyList'],
                 'Credito (€)': variant['Credit'],
                 'Stato': status,
@@ -360,11 +360,13 @@ def price_rows(records):
                     hashlib.sha256(variant_signature(variant).encode('utf-8')).hexdigest(),
                 'ID ripetuto nella carta': id_counts[str(variant['IdProduct'])] > 1,
                 'Voci con stesso ID': id_counts[str(variant['IdProduct'])],
+                'Lingua specificata dal sito': bool((variant.get('Language') or '').strip()),
+                'Condizione specificata dal sito': bool((variant.get('Condition') or '').strip()),
             })
     return prices
 
 
-def save_excel(path, records, pages_log, complete, error='', queries_log=None):
+def save_excel(path, records, pages_log, complete, error='', queries_log=None, resume_source=''):
     queries_log = queries_log or []
     prices = price_rows(records)
     cards, raw = [], []
@@ -377,8 +379,8 @@ def save_excel(path, records, pages_log, complete, error='', queries_log=None):
             'Espansione': row['expansion'],
             'Numero carta': p.get('SerialNumber'),
             'Numero varianti': len(parse_variants(row)),
-            'Lingue nelle varianti': ', '.join(dict.fromkeys(v['Language'] for v in parse_variants(row))),
-            'Condizioni nelle varianti': ', '.join(dict.fromkeys(v['Condition'] for v in parse_variants(row))),
+            'Lingue nelle varianti': ', '.join(dict.fromkeys(v.get('Language') or '(non specificata)' for v in parse_variants(row))),
+            'Condizioni nelle varianti': ', '.join(dict.fromkeys(v.get('Condition') or '(non specificata)' for v in parse_variants(row))),
             'Immagine': row['image'],
         })
         payload = json.dumps(p, ensure_ascii=False, sort_keys=True)
@@ -390,6 +392,7 @@ def save_excel(path, records, pages_log, complete, error='', queries_log=None):
         {'Voce': 'Fonte', 'Valore': URL},
         {'Voce': 'Versione scraper', 'Valore': VERSION},
         {'Voce': 'Data UTC', 'Valore': datetime.now(timezone.utc).isoformat()},
+        {'Voce': 'Ripresa da checkpoint', 'Valore': resume_source or 'No'},
         {'Voce': 'Carte distinte', 'Valore': len(cards)},
         {'Voce': 'Varianti nel foglio Prezzi', 'Valore': len(prices)},
         {'Voce': 'Carte senza varianti pubblicate', 'Valore': sum(not parse_variants(row) for row in records.values())},
@@ -400,6 +403,7 @@ def save_excel(path, records, pages_log, complete, error='', queries_log=None):
         {'Voce': 'Righe senza prezzo', 'Valore': 'Conservate anche valutazioni su richiesta, esclusioni e prezzi zero. Zero non è una quotazione positiva.'},
         {'Voce': 'ID variante', 'Valore': 'IdProduct può essere ripetuto nel sito. Le voci con dati diversi restano separate con Chiave voce univoca e segnalazione ID ripetuto. Non sono necessariamente varianti fisiche diverse.'},
         {'Voce': 'Aggiornamenti prezzi', 'Valore': 'Per lo stesso ID/lingua/condizione/foil/prima edizione conserva tutte le voci dell’ultima osservazione; non aggiunge i prezzi precedenti come nuove quotazioni.'},
+        {'Voce': 'Metadati non specificati', 'Valore': 'Lingua o condizione vuota/null/assente viene conservata senza attribuire una lingua o condizione inventata. Le colonne specificata dal sito segnalano questi casi.'},
         {'Voce': 'Copertura', 'Valore': 'Ricerca generale e ricerca separata per ogni espansione disponibile; tutte le pagine di ciascuna ricerca.'},
         {'Voce': 'Errore', 'Valore': error},
     ]
@@ -424,13 +428,68 @@ def save_excel(path, records, pages_log, complete, error='', queries_log=None):
     temp.replace(path)
 
 
-def scrape(output, timeout=120, headed=False, partial_interval=900, load_images=False):
+def query_key(edition):
+    return '__generale__' if edition is None else str(edition)
+
+
+def load_checkpoint(path):
+    """Recupera risultati e ricerche concluse; una ricerca interrotta riparte da 1."""
+    records, pages, completed = {}, [], {}
+    valid_bytes = 0
+    header = None
+    with Path(path).open('rb') as stream:
+        for line_number, raw in enumerate(stream, 1):
+            if not raw.strip():
+                valid_bytes += len(raw)
+                continue
+            try:
+                item = json.loads(raw)
+            except (ValueError, UnicodeDecodeError) as exc:
+                if not raw.endswith(b'\n'):
+                    print('Checkpoint: ultima riga troncata ignorata; la ricerca incompleta verrà rifatta.', flush=True)
+                    break
+                raise RuntimeError(f'Checkpoint non leggibile alla riga {line_number}.') from exc
+            valid_bytes += len(raw)
+            if header is None:
+                header = item
+                if item.get('url') != URL or not str(item.get('version', '')).startswith(('5.', '6.')) or not item.get('ricerche'):
+                    raise RuntimeError('Checkpoint di fonte/versione non compatibile: occorre una versione 5.x/6.x.')
+                continue
+            for row in item.get('righe', []):
+                # I giornali 5.x scrivono il prodotto già unito alle osservazioni
+                # precedenti, quindi l'ultima riga per carta è lo snapshot completo.
+                records[product_key(row)] = row
+            if 'pagina' in item:
+                pages.append(item['pagina'])
+            done = item.get('ricerca_completata')
+            if done:
+                if done.get('Stato') != 'COMPLETATA' or 'ID espansione' not in done:
+                    raise RuntimeError('Marcatore ricerca completata non valido nel checkpoint.')
+                completed[query_key(done['ID espansione'])] = done
+    if header is None:
+        raise RuntimeError('Checkpoint vuoto.')
+    expected = {query_key(q['id']) for q in header['ricerche']}
+    if not set(completed).issubset(expected):
+        raise RuntimeError('Checkpoint con ricerche sconosciute.')
+    for row in records.values():
+        parse_variants(row)
+    return {'records': records, 'pages': pages, 'completed': completed,
+            'queries': header['ricerche'], 'valid_bytes': valid_bytes}
+
+
+def scrape(output, timeout=120, headed=False, partial_interval=900, load_images=False, resume_checkpoint=None,
+           live_sheets=False, live_batch_size=50, live_flush_seconds=30):
     output = Path(output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     partial = output.with_name(output.stem.replace('_Completa', '') + '_PARZIALE.xlsx')
     checkpoint = output.with_suffix('.checkpoint.jsonl')
     records, log, queries_log = {}, [], []
+    resumed = load_checkpoint(resume_checkpoint) if resume_checkpoint else None
+    resume_source = Path(resume_checkpoint).name if resume_checkpoint else ''
+    if resumed:
+        records, log = resumed['records'], resumed['pages']
     last_row = None
+    live = None
     last_partial = time.monotonic()
     print(f'CardGameCorner scraper {VERSION} | {URL}', flush=True)
     with sync_playwright() as playwright:
@@ -467,11 +526,33 @@ def scrape(output, timeout=120, headed=False, partial_interval=900, load_images=
             if not editions:
                 raise RuntimeError('Nessuna espansione disponibile: non posso certificare la copertura.')
             queries = [{'id': None, 'name': 'Ricerca generale'}] + editions
+            if resumed and {query_key(q['id']) for q in queries} != {query_key(q['id']) for q in resumed['queries']}:
+                raise RuntimeError('Elenco espansioni diverso dal checkpoint: avviare una nuova scansione.')
             edition_selector = page.locator('select[ng-options*="Filters.Expansions"]')
-            with checkpoint.open('w', encoding='utf-8') as journal:
-                journal.write(json.dumps({'version': VERSION, 'url': URL, 'ricerche': queries}, ensure_ascii=False) + '\n')
+            if resumed:
+                if Path(resume_checkpoint).resolve() != checkpoint:
+                    shutil.copyfile(resume_checkpoint, checkpoint)
+                with checkpoint.open('r+b') as previous_journal:
+                    previous_journal.truncate(resumed['valid_bytes'])
+                print(f"RIPRESA: {len(records)} carte, {len(resumed['completed'])}/{len(queries)} ricerche già completate.", flush=True)
+            with checkpoint.open('a' if resumed else 'w', encoding='utf-8') as journal:
+                if resumed:
+                    journal.write('\n' + json.dumps({'ripresa': {'version': VERSION, 'source': resume_source,
+                                  'timestamp_utc': datetime.now(timezone.utc).isoformat()}}) + '\n')
+                else:
+                    journal.write(json.dumps({'version': VERSION, 'url': URL, 'ricerche': queries}, ensure_ascii=False) + '\n')
+                journal.flush()
+                os.fsync(journal.fileno())
+                if live_sheets:
+                    from live_sheets import LiveSheetsBackup
+                    live = LiveSheetsBackup(checkpoint, output.with_suffix('.live.status.json'), price_rows,
+                        product_key, batch_size=live_batch_size, flush_seconds=live_flush_seconds).start()
                 for query_index, query in enumerate(queries):
                     edition = query['id']
+                    if resumed and query_key(edition) in resumed['completed']:
+                        queries_log.append(dict(resumed['completed'][query_key(edition)], **{'Ripresa da checkpoint': True}))
+                        print(f"Ricerca {query_index + 1}/{len(queries)} già completata: {query['name']}", flush=True)
+                        continue
                     query_log = {'Espansione': query['name'], 'ID espansione': edition,
                                  'Stato': 'IN CORSO', 'Pagine': 0, 'Carte nella ricerca': 0}
                     queries_log.append(query_log)
@@ -531,6 +612,7 @@ def scrape(output, timeout=120, headed=False, partial_interval=900, load_images=
                         query_log.update(Pagine=expected_page, **{'Carte nella ricerca': len(query_seen)})
                         journal.write(json.dumps({'pagina': item, 'righe': updated_rows}, ensure_ascii=False) + '\n')
                         journal.flush()
+                        os.fsync(journal.fileno())
                         print(f"  Pagina {state['page']}/{expected_pages} | ricerca {len(query_seen)} | totale distinto {len(records)}", flush=True)
                         if state['page'] == expected_pages:
                             break
@@ -558,7 +640,7 @@ def scrape(output, timeout=120, headed=False, partial_interval=900, load_images=
                     # Il JSONL rimane aggiornato dopo ogni pagina. L'Excel grande
                     # viene riscritto a intervalli, anziché ogni dieci espansioni.
                     if partial_interval and time.monotonic() - last_partial >= partial_interval:
-                        save_excel(partial, records, log, False, queries_log=queries_log)
+                        save_excel(partial, records, log, False, queries_log=queries_log, resume_source=resume_source)
                         last_partial = time.monotonic()
             if len(queries_log) != len(queries) or any(q['Stato'] != 'COMPLETATA' for q in queries_log):
                 raise RuntimeError('Non tutte le espansioni sono state completate.')
@@ -567,17 +649,24 @@ def scrape(output, timeout=120, headed=False, partial_interval=900, load_images=
                 raise RuntimeError('Elenco espansioni cambiato durante la scansione: ripetere.')
             if not records:
                 raise RuntimeError('Nessuna carta estratta.')
-            save_excel(output, records, log, True, queries_log=queries_log)
+            save_excel(output, records, log, True, queries_log=queries_log, resume_source=resume_source)
             partial.unlink(missing_ok=True)
             total_variants = sum(len(parse_variants(row)) for row in records.values())
+            if live:
+                if live.finish(True, expected_cards=len(records), expected_prices=total_variants):
+                    print('Google live: dataset COMPLETO in CGC_LIVE_Prezzi.', flush=True)
+                else:
+                    print('Google live: backup non completato; Excel completo e checkpoint disponibili.', file=sys.stderr, flush=True)
             print(f'ESTRAZIONE COMPLETATA: {len(records)} carte, {total_variants} varianti, {len(log)} pagine, {len(editions)} espansioni. File: {output}', flush=True)
         except Exception as exc:
             if records:
                 try:
-                    save_excel(partial, records, log, False, str(exc), queries_log)
+                    save_excel(partial, records, log, False, str(exc), queries_log, resume_source=resume_source)
                     print(f'SALVATO SOLO IL PARZIALE: {partial}', file=sys.stderr, flush=True)
                 except Exception as save_error:
                     print(f'Errore salvando Excel parziale: {save_error}. Conservato il giornale JSONL.', file=sys.stderr, flush=True)
+            if live:
+                live.finish(False)
             diagnostic = {'version': VERSION, 'url': URL, 'error': str(exc),
                           'cards': len(records), 'queries': queries_log,
                           'timestamp_utc': datetime.now(timezone.utc).isoformat()}
@@ -608,6 +697,10 @@ def main():
     parser.add_argument('--timeout', type=int, default=120, help='Timeout in secondi per ogni pagina')
     parser.add_argument('--headed', action='store_true', help='Mostra il browser durante la lettura locale')
     parser.add_argument('--load-images', action='store_true', help='Scarica anche immagini, font e video (più lento)')
+    parser.add_argument('--resume-checkpoint', type=Path, help='Riprende dal giornale di una precedente esecuzione 5.x/6.x')
+    parser.add_argument('--live-sheets', action='store_true', help='Backup Google progressivo in background, oltre al checkpoint locale')
+    parser.add_argument('--live-batch-size', type=int, default=50, help='Carte per blocco del backup Google (default 50)')
+    parser.add_argument('--live-flush-seconds', type=float, default=30, help='Invio anche con blocco incompleto dopo questi secondi')
     parser.add_argument('--partial-interval', type=int, default=900,
                         help='Secondi tra copie Excel parziali; 0 = solo su errore (JSONL sempre aggiornato)')
     args = parser.parse_args()
@@ -615,7 +708,12 @@ def main():
         parser.error('--timeout deve essere positivo')
     if args.partial_interval < 0:
         parser.error('--partial-interval non può essere negativo')
-    scrape(args.output, args.timeout, args.headed, args.partial_interval, args.load_images)
+    if args.resume_checkpoint and not args.resume_checkpoint.is_file():
+        parser.error('Checkpoint di ripresa non trovato')
+    if args.live_batch_size < 1 or args.live_flush_seconds <= 0:
+        parser.error('Dimensione e intervallo del backup Google devono essere positivi')
+    scrape(args.output, args.timeout, args.headed, args.partial_interval, args.load_images, args.resume_checkpoint,
+           args.live_sheets, args.live_batch_size, args.live_flush_seconds)
 
 
 if __name__ == '__main__':

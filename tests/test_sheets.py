@@ -33,6 +33,7 @@ class MemorySheets:
         self.corrupt_read = False
         self.rate_limit_once = False
         self.rate_limited = False
+        self.transient_final_failures = 0
 
     def request(self, method, url, json=None, params=None, timeout=None):
         self.calls.append((method, url, copy.deepcopy(json), params))
@@ -76,6 +77,9 @@ class MemorySheets:
         final = any('copyPaste' in op for op in operations)
         if final and self.fail_final:
             return Response(status=400)
+        if final and self.transient_final_failures:
+            self.transient_final_failures -= 1
+            return Response(status=500)
         pending = copy.deepcopy(self.sheets)
         for op in operations:
             if 'addSheet' in op:
@@ -89,7 +93,9 @@ class MemorySheets:
                 del pending[op['deleteSheet']['sheetId']]
             elif 'updateSheetProperties' in op:
                 p = op['updateSheetProperties']['properties']
-                pending[p['sheetId']]['properties']['gridProperties'].update(p.get('gridProperties', {}))
+                props = pending[p['sheetId']]['properties']
+                props.setdefault('gridProperties', {}).update(p.get('gridProperties', {}))
+                props.update({k: copy.deepcopy(v) for k, v in p.items() if k not in ('sheetId', 'gridProperties')})
             elif 'updateCells' in op:
                 pending[op['updateCells']['range']['sheetId']]['values'] = []
             elif 'copyPaste' in op:
@@ -181,6 +187,31 @@ class GoogleSheetsTests(unittest.TestCase):
         finals = [call for call in memory.calls if call[2] and any('copyPaste' in r for r in call[2].get('requests', []))]
         self.assertEqual(len(finals), 1)
         self.assertEqual(len(memory.sheets), 5)
+
+    def test_final_http_500_retries_only_after_proving_not_applied(self):
+        memory = MemorySheets()
+        memory.transient_final_failures = 1
+        with patch.object(sync.time, 'sleep'):
+            self.client(memory).publish(sample_tables())
+        finals = [c for c in memory.calls if c[2] and any('copyPaste' in r for r in c[2].get('requests', []))]
+        self.assertEqual(len(finals), 2)
+        self.assertEqual(finals[0][2], finals[1][2])
+        self.assertEqual(len([c for c in memory.calls if c[0] == 'PUT']), 4)
+        self.assertEqual(len(memory.sheets), 5)
+
+    def test_persistent_500_is_bounded_and_preserves_previous_data(self):
+        memory = MemorySheets()
+        client = self.client(memory)
+        client.publish(sample_tables())
+        previous = copy.deepcopy(memory.sheets)
+        memory.calls.clear()
+        memory.transient_final_failures = 5
+        with patch.object(sync.time, 'sleep'):
+            with self.assertRaisesRegex(sync.SheetsError, 'HTTP 500'):
+                client.publish(sample_tables())
+        finals = [c for c in memory.calls if c[2] and any('copyPaste' in r for r in c[2].get('requests', []))]
+        self.assertEqual(len(finals), 3)
+        self.assertEqual(memory.sheets, previous)
 
     def test_rate_limit_retries_same_range_without_duplicate_rows(self):
         memory = MemorySheets()
