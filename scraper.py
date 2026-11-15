@@ -15,9 +15,9 @@ def scrape_buylist():
 
         print(f"Apertura {URL}...")
         page.goto(URL, wait_until="networkidle", timeout=60000)
-        time.sleep(3)
+        time.sleep(4)
 
-        # Chiude eventuali banner cookie/popup
+        # Chiude eventuali banner cookie
         for selector in ["button:has-text('Accetta')", "button:has-text('Chiudi')", ".close"]:
             try:
                 if page.locator(selector).first.is_visible():
@@ -26,7 +26,7 @@ def scrape_buylist():
             except Exception:
                 pass
 
-        # Disattiva eventuali filtri "Solo Hot Cards" per mostrare tutto il catalogo
+        # Clicca sul filtro "Tutto" se presente per sbloccare l'intero catalogo
         try:
             tutto_btn = page.locator("text=Tutto").first
             if tutto_btn.is_visible():
@@ -35,71 +35,103 @@ def scrape_buylist():
         except Exception:
             pass
 
-        # Scorre la pagina fino in fondo per caricare tutte le carte (infinite scroll / paginazione)
+        # Scorre la pagina ripetutamente per caricare tutto il catalogo dinamico
         last_height = page.evaluate("document.body.scrollHeight")
         scroll_attempts = 0
-        while scroll_attempts < 100:
+        while scroll_attempts < 150:
             page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            time.sleep(2)
+            time.sleep(2.5)
 
-            # Se c'è un pulsante "Carica altro" o "Successiva", lo clicca
-            next_btn = page.locator("button:has-text('Carica'), a:has-text('Successiva'), .pagination .next").first
-            if next_btn.is_visible():
+            # Clicca su eventuali pulsanti "Carica altro"
+            for btn_selector in ["button:has-text('Carica')", "a:has-text('Successiva')", ".load-more", ".pagination .next"]:
                 try:
-                    next_btn.click()
-                    time.sleep(2.5)
+                    btn = page.locator(btn_selector).first
+                    if btn.is_visible():
+                        btn.click()
+                        time.sleep(2)
                 except Exception:
                     pass
 
             new_height = page.evaluate("document.body.scrollHeight")
-            if new_height == last_height and not next_btn.is_visible():
-                break
-            last_height = new_height
+            if new_height == last_height:
+                # Prova un secondo scroll di sicurezza
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight - 500)")
+                time.sleep(1.5)
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                time.sleep(2)
+                new_height_check = page.evaluate("document.body.scrollHeight")
+                if new_height_check == last_height:
+                    break
+            last_height = new_height_check if 'new_height_check' in locals() else new_height
             scroll_attempts += 1
-            print(f"Scorrimento {scroll_attempts} - Altezza pagina: {new_height}")
+            print(f"Scorrimento n. {scroll_attempts} completato...")
 
-        # Estrazione di tutte le card renderizzate nel DOM
-        items = page.evaluate("""() => {
+        # Estrazione mirata dei box prodotto
+        extracted_items = page.evaluate("""() => {
             const results = [];
-            // Seleziona tutti i blocchi che contengono un prezzo in Euro
-            const allElements = document.querySelectorAll('div, li, tr');
-            allElements.forEach(el => {
+            // Cerca tutti i contenitori tipici di card/prodotti nel sito
+            const items = document.querySelectorAll('.product-item, .card-item, div[class*="card"], div[class*="product"], li[class*="item"]');
+            
+            items.forEach(el => {
                 const text = el.innerText || '';
-                if (text.includes('€') && text.length < 350 && el.children.length >= 2) {
-                    const lines = text.split('\\n').map(l => l.trim()).filter(l => l.length > 0);
-                    const priceLine = lines.find(l => l.includes('€'));
-                    if (priceLine && lines.length >= 2) {
-                        results.push({
-                            raw: lines.join(' | '),
-                            price: priceLine
-                        });
-                    }
+                if (text.includes('€')) {
+                    results.push(text);
                 }
             });
+            
+            // Fallback se i selettori specifici non bastano: analizza tutti i blocchi con prezzo
+            if (results.length < 10) {
+                const allDivs = document.querySelectorAll('div');
+                allDivs.forEach(el => {
+                    const t = el.innerText || '';
+                    if (t.includes('€') && t.length < 400 && el.children.length >= 2) {
+                        results.push(t);
+                    }
+                });
+            }
             return results;
         }""")
 
-        for item in items:
-            parts = [x.strip() for x in item["raw"].split("|")]
-            # Filtra voci di menu o duplicati annidati
-            if any(x in item["raw"] for x in ["Vedi carrello", "Login", "Filtri"]):
-                continue
-            key = item["raw"]
-            if key not in seen:
-                seen.add(key)
-                cards.append({
-                    "Dettagli Estratti": item["raw"],
-                    "Carta / Info": parts[0] if len(parts) > 0 else "",
-                    "Espansione / Extra": parts[1] if len(parts) > 1 else "",
-                    "Prezzo Buylist": item["price"]
-                })
+        print(f"Trovati {len(extracted_items)} elementi grezzi. Elaborazione in corso...")
+
+        for item in extracted_items:
+            # Pulisce e formatta le righe
+            lines = [l.strip() for l in item.split('\n') if l.strip()]
+            price_line = next((l for l in lines if '€' in l), None)
+            
+            if price_line and len(lines) >= 2:
+                # Esclude menu e voci di navigazione
+                if any(kw in item for kw in ["Vedi carrello", "Login", "Filtri", "Privacy", "Cookie"]):
+                    continue
+                
+                # Identifica il nome della carta (di solito penultima o terzultima riga prima del prezzo)
+                clean_lines = [l for l in lines if l not in ['Italiano', 'English', 'Spanish', 'Near Mint', 'Excellent', 'Heavily Played', 'Poor/Damaged', 'Reverse', 'First Edition', 'IT', 'EN', 'ES', 'NM/M', 'SP', 'HP', 'D'] and '€' not in l]
+                
+                if len(clean_lines) >= 2:
+                    carta = clean_lines[-1]
+                    espansione = clean_lines[-2]
+                elif len(clean_lines) == 1:
+                    carta = clean_lines[0]
+                    espansione = "Catalogo Generale"
+                else:
+                    continue
+
+                # Pulisce il prezzo lasciando solo il numero/valuta
+                row_key = f"{carta}|{espansione}|{price_line}"
+                if row_key not in seen:
+                    seen.add(row_key)
+                    cards.append({
+                        "Carta": carta,
+                        "Espansione": espansione,
+                        "Prezzo Buylist": price_line
+                    })
 
         browser.close()
 
     df = pd.DataFrame(cards)
     output_file = "CardGameCorner_Buylist_Completa.xlsx"
     df.to_excel(output_file, index=False)
-    print(f"Fatto! Estratte {len(df)} righe salvate in {output_file}")
+    print(f"Fatto! Estratte con successo {len(df)} carte uniche salvate in {output_file}")
 
 if __name__ == "__main__":
     scrape_buylist()
