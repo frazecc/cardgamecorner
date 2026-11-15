@@ -1,0 +1,22 @@
+{
+  "project_id": "uzvvzuoorpdivanwbsen",
+  "import_id": "cgc-a8bcb48c5e65e855345d946ce8aa57a9",
+  "source_run_id": "43749325476",
+  "cards": 34292,
+  "prices": 224437,
+  "queries": 334,
+  "card_keys_sha256": "919b0eb2474b849bdc9b43aa1401441e9b366a9b8860e364c9e33f0475a5e1cf",
+  "price_keys_sha256": "341867539458476a04f65a1ab6e16e7e5662caa0716562796249fa01535c6212",
+  "state": "COMPLETE",
+  "tests_passed": 85,
+  "version": "6.2.0",
+  "project_name": "cardgamecorner-buylist",
+  "organization": "bdimmagini",
+  "security_advisors": "no_errors_or_warnings; private_staging_default_deny_expected",
+  "update_mode": "incremental_atomic",
+  "schedule": {
+    "cron": "17 6 * * 1,4",
+    "timezone": "Europe/Rome",
+    "github_activation": "requires_files_on_main_and_project_secret"
+  }
+}

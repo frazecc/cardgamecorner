@@ -1,4 +1,14 @@
-# CardGameCorner Buylist Pokémon — versione 6.0.0
+# CardGameCorner Buylist Pokémon — versione 6.2.0
+
+Il progetto dedicato **cardgamecorner-buylist** contiene la raccolta completa
+su Supabase: **34.292 carte, 224.437 voci prezzo, 334 ricerche concluse**.
+Aprire **SUPABASE.md** per consultarlo e configurare gli aggiornamenti GitHub.
+Il workflow **Buylist CardGameCorner in Supabase** e pianificato il lunedi e
+giovedi alle **06:17 Europe/Rome**. Aggiorna solo le differenze dopo una nuova
+raccolta completa, mantenendo un archivio corrente. La pianificazione si attiva
+dopo aver caricato il workflow su main e configurato il secret del nuovo
+progetto: vedere **SUPABASE.md**. Le istruzioni seguenti riguardano il workflow Sheets
+precedente, ancora disponibile separatamente.
 
 La versione 6 aggiunge il backup Google DURANTE la raccolta: normalmente 50 carte
 per blocco e invio anche dopo 30 secondi con un blocco incompleto. La seconda

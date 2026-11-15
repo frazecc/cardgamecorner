@@ -28,7 +28,7 @@ from playwright.sync_api import sync_playwright
 
 URL = "https://www.cardgamecorner.com/it/buylist-2026?game=pokemon"
 OUTPUT = "CardGameCorner_Buylist_Pokemon_Completa.xlsx"
-VERSION = "6.0.0"
+VERSION = "6.2.0"
 MORE = 'button[ng-click="showMore()"]'
 PRODUCT = '[ng-repeat="product in expansion.Products"]'
 
