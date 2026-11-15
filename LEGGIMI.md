@@ -1,4 +1,4 @@
-# CardGameCorner Buylist Pokémon — versione 3.1.0
+# CardGameCorner Buylist Pokémon — versione 3.2.0
 
 Sostituisci nel repository i due file contenuti nello ZIP, mantenendo i percorsi:
 - scraper.py
@@ -86,3 +86,17 @@ Per aggiornare la versione 3.0 basta sostituire scraper.py con quello di questo
 ZIP; il workflow è invariato. I test sono facoltativi per l'esecuzione.
 Questi controlli non sostituiscono una scansione completa sul sito: il totale
 finale di carte e la conclusione della scansione 3.1 restano da verificare.
+
+## Correzione 3.2.0 — ricerche con zero pagine
+
+Corretto il timeout con pagina=1, pagine=0, pending=0 quando manca il messaggio
+"Nessun prodotto corrisponde alla tua ricerca.". Prima di accettare il risultato
+vuoto lo script verifica una risposta JSON HTTP riuscita, l'assenza di richieste
+Angular pendenti, l'elenco prodotti vuoto, il filtro corretto e la stabilità per
+due secondi. Errori HTTP e di rete non vengono classificati come espansioni vuote.
+Il foglio Espansioni annota le ricerche che non restituiscono risultati.
+
+Passano 11 test automatici, incluso lo stato del timeout segnalato. Non è stata
+eseguita da qui una scansione completa del sito con la 3.2; il conteggio finale
+resta da verificare. Per aggiornare basta sostituire scraper.py e avviare una nuova
+esecuzione su main, senza rilanciare un vecchio job associato al vecchio commit.

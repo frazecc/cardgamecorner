@@ -17,13 +17,14 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pandas as pd
 from playwright.sync_api import sync_playwright
 
 URL = "https://www.cardgamecorner.com/it/buylist-2026?game=pokemon"
 OUTPUT = "CardGameCorner_Buylist_Pokemon_Completa.xlsx"
-VERSION = "3.1.0"
+VERSION = "3.2.0"
 MORE = 'button[ng-click="showMore()"]'
 PRODUCT = '[ng-repeat="product in expansion.Products"]'
 
@@ -79,6 +80,7 @@ READ_STATE = r"""() => {
     return {
         page: Number(scope.PageNumber), pages: Number(scope.PageCount), pending,
         no_results: document.body.innerText.includes('Nessun prodotto corrisponde alla tua ricerca.'),
+        data_empty: Array.isArray(scope.Expansions) && scope.Expansions.length === 0,
         // SearchMobile chiude i filtri e può rimuovere i select dal DOM.
         // L'elenco dei dati resta nello scope anche a pannello chiuso.
         editions: (scope.Filters?.Expansions || []).filter(exp=>exp.Id != null)
@@ -109,6 +111,42 @@ def fingerprint(state):
     return tuple(product_key(row) for row in state['rows'])
 
 
+class SearchMonitor:
+    """Distingue una risposta vuota riuscita da un errore di rete/HTTP."""
+    def __init__(self, page):
+        self.successful_json = 0
+        self.errors = []
+        self.active = False
+        page.on('response', self.response)
+        page.on('requestfailed', self.failed)
+
+    def begin(self):
+        self.successful_json = 0
+        self.errors = []
+        self.active = True
+
+    def relevant(self, request):
+        return (self.active and request.resource_type in ('xhr', 'fetch')
+                and urlparse(request.url).hostname == urlparse(URL).hostname)
+
+    def response(self, response):
+        if not self.relevant(response.request):
+            return
+        if response.status >= 400:
+            self.errors.append(f'HTTP {response.status}: {urlparse(response.url).path}')
+        elif 'json' in response.headers.get('content-type', '').lower():
+            self.successful_json += 1
+
+    def failed(self, request):
+        if self.relevant(request):
+            self.errors.append(f'Richiesta fallita: {urlparse(request.url).path}')
+
+
+def start_search(page):
+    page._buylist_monitor.begin()
+    page.locator('#button-search').click()
+
+
 def wait_ready(page, timeout, previous=None, expected_page=None, edition=None, require_editions=False):
     deadline = time.monotonic() + timeout
     stable = None
@@ -116,6 +154,10 @@ def wait_ready(page, timeout, previous=None, expected_page=None, edition=None, r
     last = None
     while time.monotonic() < deadline:
         state = page.evaluate(READ_STATE)
+        last = state
+        monitor = getattr(page, '_buylist_monitor', None)
+        if monitor is not None and monitor.errors:
+            raise RuntimeError('Errore nel caricamento: ' + '; '.join(monitor.errors))
         current_edition = (state or {}).get('filters', {}).get('edition')
         edition_ok = str(current_edition or '') == str(edition or '')
         if not state or (require_editions and not state['editions']):
@@ -126,11 +168,15 @@ def wait_ready(page, timeout, previous=None, expected_page=None, edition=None, r
             stable, since = None, None
             page.wait_for_timeout(250)
             continue
-        if state['no_results'] and not state['rows']:
+        empty_response = (state['pages'] == 0 and state.get('data_empty') is True
+                          and monitor is not None and monitor.successful_json > 0)
+        response_ok = monitor is None or monitor.successful_json > 0
+        if (state['no_results'] or empty_response) and not state['rows'] and response_ok:
             marker = ('empty', str(edition), state['page'], state['pages'])
             if marker != stable:
                 stable, since = marker, time.monotonic()
-            elif time.monotonic() - since >= 1.0:
+            elif time.monotonic() - since >= 2.0:
+                state['empty_confirmed'] = True
                 return state
             page.wait_for_timeout(250)
             continue
@@ -160,7 +206,7 @@ def validate_state(state, edition=None):
     expected = {} if edition is None else {'edition': edition}
     if {k: str(v) for k, v in active.items()} != {k: str(v) for k, v in expected.items()}:
         raise RuntimeError(f'Filtri diversi dalla ricerca attesa: {active}; attesi: {expected}')
-    if state['no_results'] and not state['rows']:
+    if (state['no_results'] or state.get('empty_confirmed')) and not state['rows']:
         return
     if not 1 <= state['page'] <= state['pages']:
         raise RuntimeError('Numeri di pagina non validi.')
@@ -233,6 +279,7 @@ def scrape(output, timeout=120, headed=False):
         browser = playwright.chromium.launch(headless=not headed)
         page = browser.new_page(viewport={'width': 1920, 'height': 1080})
         page.set_default_timeout(timeout * 1000)
+        page._buylist_monitor = SearchMonitor(page)
         try:
             page.goto(URL, wait_until='domcontentloaded', timeout=timeout * 1000)
             reject = page.get_by_role('button', name='Rifiuta tutto', exact=True)
@@ -251,7 +298,7 @@ def scrape(output, timeout=120, headed=False):
             }""", timeout=timeout * 1000)
             page.locator('#simplesearch').fill('')
             page.locator('select[ng-model="OnlyBuyList"]').select_option(label='Tutto')
-            page.locator('#button-search').click()
+            start_search(page)
             state = wait_ready(page, timeout, expected_page=1, require_editions=True)
             editions = state['editions']
             if not editions:
@@ -282,7 +329,7 @@ def scrape(output, timeout=120, headed=False):
                             return matches[0].value;
                         }""", edition)
                         edition_selector.select_option(value=option_value)
-                        page.locator('#button-search').click()
+                        start_search(page)
                         # Ricerche diverse possono avere risultati identici:
                         # il fingerprint è necessario solo nella paginazione.
                         state = wait_ready(page, timeout, expected_page=1, edition=edition)
@@ -323,6 +370,7 @@ def scrape(output, timeout=120, headed=False):
                             break
                         previous = fingerprint(state)
                         page.locator(MORE).wait_for(state='visible', timeout=timeout * 1000)
+                        page._buylist_monitor.begin()
                         page.locator(MORE).click()
                         expected_page += 1
                         for attempt in range(3):
@@ -335,6 +383,9 @@ def scrape(output, timeout=120, headed=False):
                                 print('Caricamento lento: attendo ancora senza cliccare due volte.', flush=True)
                         if not state['rows']:
                             raise RuntimeError('Pagina vuota prima della fine prevista.')
+                    if not query_seen:
+                        query_log['Esito'] = 'NESSUN RISULTATO: risposta vuota verificata'
+                        print('  Nessun risultato: passo alla prossima espansione.', flush=True)
                     query_log['Stato'] = 'COMPLETATA'
                     journal.write(json.dumps({'ricerca_completata': query_log}, ensure_ascii=False) + '\n')
                     journal.flush()
