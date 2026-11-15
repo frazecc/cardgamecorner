@@ -1,4 +1,4 @@
-"""Esporta l'intera ricerca PokÃ©mon della buylist, seguendo la paginazione reale.
+"""Esporta l'intera ricerca Pokémon della buylist, seguendo la paginazione reale.
 
 Dipendenze: pip install playwright pandas openpyxl
 Browser:    playwright install chromium
@@ -23,6 +23,7 @@ from playwright.sync_api import sync_playwright
 
 URL = "https://www.cardgamecorner.com/it/buylist-2026?game=pokemon"
 OUTPUT = "CardGameCorner_Buylist_Pokemon_Completa.xlsx"
+VERSION = "3.0.0"
 MORE = 'button[ng-click="showMore()"]'
 PRODUCT = '[ng-repeat="product in expansion.Products"]'
 
@@ -77,6 +78,9 @@ READ_STATE = r"""() => {
     });
     return {
         page: Number(scope.PageNumber), pages: Number(scope.PageCount), pending,
+        no_results: document.body.innerText.includes('Nessun prodotto corrisponde alla tua ricerca.'),
+        editions: [...(document.querySelector('select[ng-options="exp.Id as exp.Espansione for exp in Filters.Expansions"]')?.options || [])]
+            .filter(o=>o.value.startsWith('number:')).map(o=>({id:Number(o.value.split(':')[1]), value:o.value, name:o.textContent.trim()})),
         only_hot: scope.OnlyBuyList,
         filters: clean(scope.SelectedFilters || {}), rows,
         more: [...document.querySelectorAll('button[ng-click="showMore()"]')]
@@ -103,14 +107,18 @@ def fingerprint(state):
     return tuple(product_key(row) for row in state['rows'])
 
 
-def wait_ready(page, timeout, previous=None, expected_page=None):
+def wait_ready(page, timeout, previous=None, expected_page=None, edition=None):
     deadline = time.monotonic() + timeout
     stable = None
     since = None
     last = None
     while time.monotonic() < deadline:
         state = page.evaluate(READ_STATE)
-        if state and state['rows'] and state['pending'] == 0:
+        current_edition = (state or {}).get('filters', {}).get('edition')
+        edition_ok = str(current_edition or '') == str(edition or '')
+        if state and state['pending'] == 0 and edition_ok and state['no_results'] and not state['rows']:
+            return state
+        if state and state['rows'] and state['pending'] == 0 and edition_ok:
             if state['pages'] < 1 or state['page'] < 1:
                 page.wait_for_timeout(250)
                 continue
@@ -129,17 +137,21 @@ def wait_ready(page, timeout, previous=None, expected_page=None):
     raise RuntimeError(f'Caricamento non completato entro {timeout}s: {detail}. Nessuna pagina saltata.')
 
 
-def validate_state(state):
+def validate_state(state, edition=None):
     if state['only_hot'] is not False:
-        raise RuntimeError('Il filtro Hot Cards non Ã¨ impostato su Tutto.')
+        raise RuntimeError('Il filtro Hot Cards non è impostato su Tutto.')
     active = {k: v for k, v in state['filters'].items() if v not in (None, '', False, [])}
-    if active:
-        raise RuntimeError(f'Ricerca ancora filtrata: {active}')
+    expected = {} if edition is None else {'edition': edition}
+    if {k: str(v) for k, v in active.items()} != {k: str(v) for k, v in expected.items()}:
+        raise RuntimeError(f'Filtri diversi dalla ricerca attesa: {active}; attesi: {expected}')
+    if state['no_results'] and not state['rows']:
+        return
     if not 1 <= state['page'] <= state['pages']:
         raise RuntimeError('Numeri di pagina non validi.')
 
 
-def save_excel(path, records, pages_log, complete, error=''):
+def save_excel(path, records, pages_log, complete, error='', queries_log=None):
+    queries_log = queries_log or []
     cards, raw = [], []
     for key, row in records.items():
         p = row['product']
@@ -165,14 +177,15 @@ def save_excel(path, records, pages_log, complete, error=''):
         for i in range(0, len(payload), 30000):
             raw.append({'ID': key, 'Parte JSON': i // 30000 + 1, 'Dati JSON': payload[i:i+30000]})
     info = [
-        {'Voce': 'Stato', 'Valore': 'COMPLETO: raggiunta ultima pagina' if complete else 'PARZIALE'},
+        {'Voce': 'Stato', 'Valore': 'COMPLETO: ricerca generale e tutte le espansioni percorse' if complete else 'PARZIALE'},
         {'Voce': 'Fonte', 'Valore': URL},
+        {'Voce': 'Versione scraper', 'Valore': VERSION},
         {'Voce': 'Data UTC', 'Valore': datetime.now(timezone.utc).isoformat()},
         {'Voce': 'Carte distinte', 'Valore': len(cards)},
         {'Voce': 'Pagine caricate', 'Valore': len(pages_log)},
-        {'Voce': 'Pagine dichiarate dal sito', 'Valore': pages_log[-1]['Pagine totali'] if pages_log else ''},
+        {'Voce': 'Ricerche completate', 'Valore': sum(q['Stato'] == 'COMPLETATA' for q in queries_log)},
         {'Voce': 'Prezzi', 'Valore': 'Combinazione selezionata dal sito per ogni carta. Non tutte le combinazioni lingua/condizione.'},
-        {'Voce': 'Copertura', 'Valore': 'Ricerca PokÃ©mon senza filtri; incluse carte non acquistate o con valutazione su richiesta se restituite dal sito.'},
+        {'Voce': 'Copertura', 'Valore': 'Ricerca generale e ricerca separata per ogni espansione disponibile; tutte le pagine di ciascuna ricerca.'},
         {'Voce': 'Errore', 'Valore': error},
     ]
     # Le stringhe provenienti dal sito restano testo, anche se iniziano con '='.
@@ -183,7 +196,7 @@ def save_excel(path, records, pages_log, complete, error=''):
         return df
     temp = path.with_name(path.stem + '.tmp.xlsx')
     with pd.ExcelWriter(temp, engine='openpyxl') as writer:
-        for name, items in [('Carte', cards), ('Pagine', pages_log), ('Info', info), ('Dati_originali', raw)]:
+        for name, items in [('Carte', cards), ('Pagine', pages_log), ('Info', info), ('Espansioni', queries_log), ('Dati_originali', raw)]:
             frame(items).to_excel(writer, sheet_name=name, index=False)
             sheet = writer.sheets[name]
             sheet.freeze_panes = 'A2'
@@ -198,8 +211,8 @@ def scrape(output, timeout=120, headed=False):
     output.parent.mkdir(parents=True, exist_ok=True)
     partial = output.with_name(output.stem.replace('_Completa', '') + '_PARZIALE.xlsx')
     checkpoint = output.with_suffix('.checkpoint.jsonl')
-    records, log = {}, []
-    last_state = None
+    records, log, queries_log = {}, [], []
+    print(f'CardGameCorner scraper {VERSION} | {URL}', flush=True)
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=not headed)
         page = browser.new_page(viewport={'width': 1920, 'height': 1080})
@@ -214,7 +227,6 @@ def scrape(output, timeout=120, headed=False):
                 if reject.is_visible():
                     raise
             page.locator('#simplesearch').wait_for(state='visible')
-            # Attendere l'inizializzazione: la home iniziale NON Ã¨ il catalogo.
             page.wait_for_function("""() => {
                 const el = document.querySelector('#simplesearch');
                 if (!el || !window.angular) return false;
@@ -223,48 +235,104 @@ def scrape(output, timeout=120, headed=False):
             }""", timeout=timeout * 1000)
             page.locator('#simplesearch').fill('')
             page.locator('select[ng-model="OnlyBuyList"]').select_option(label='Tutto')
-            # La pagina Ã¨ appena aperta: tutti gli altri filtri sono vuoti.
             page.locator('#button-search').click()
-            last_state = wait_ready(page, timeout, expected_page=1)
-            validate_state(last_state)
+            state = wait_ready(page, timeout, expected_page=1)
+            editions = state['editions']
+            if not editions:
+                raise RuntimeError('Nessuna espansione disponibile: non posso certificare la copertura.')
+            queries = [{'id': None, 'name': 'Ricerca generale'}] + editions
+            edition_selector = page.locator('select[ng-options="exp.Id as exp.Espansione for exp in Filters.Expansions"]')
             with checkpoint.open('w', encoding='utf-8') as journal:
-                while True:
-                    state = last_state
-                    validate_state(state)
-                    if state['page'] != len(log) + 1:
-                        raise RuntimeError('Paginazione non consecutiva: estrazione interrotta.')
-                    if log and state['pages'] != log[0]['Pagine totali']:
-                        raise RuntimeError('Numero di pagine cambiato durante la lettura. Ripetere per ottenere una scansione coerente.')
-                    before = len(records)
-                    for row in state['rows']:
-                        if not row['name']:
-                            raise RuntimeError('Template di una carta non ancora caricato.')
-                        records[product_key(row)] = row
-                    added = len(records) - before
-                    if added == 0:
-                        raise RuntimeError('Pagina senza nuove carte: possibile risposta duplicata, non dichiarata completa.')
-                    item = {'Pagina': state['page'], 'Pagine totali': state['pages'],
-                            'Nuove carte': added, 'Carte distinte cumulative': len(records),
-                            'Contatori sito': json.dumps(state['counters'], ensure_ascii=False)}
-                    log.append(item)
-                    journal.write(json.dumps({'pagina': item, 'righe': state['rows']}, ensure_ascii=False) + '\n')
+                journal.write(json.dumps({'version': VERSION, 'url': URL, 'ricerche': queries}, ensure_ascii=False) + '\n')
+                for query_index, query in enumerate(queries):
+                    edition = query['id']
+                    query_log = {'Espansione': query['name'], 'ID espansione': edition,
+                                 'Stato': 'IN CORSO', 'Pagine': 0, 'Carte nella ricerca': 0}
+                    queries_log.append(query_log)
+                    print(f"Ricerca {query_index + 1}/{len(queries)}: {query['name']}", flush=True)
+                    if edition is not None:
+                        previous = fingerprint(state)
+                        edition_selector.select_option(value=query['value'])
+                        page.locator('#button-search').click()
+                        state = wait_ready(page, timeout, previous, 1, edition)
+                    validate_state(state, edition)
+                    query_seen = set()
+                    expected_page = 1
+                    expected_pages = state['pages']
+                    while state['rows']:
+                        validate_state(state, edition)
+                        if state['page'] != expected_page or state['pages'] != expected_pages:
+                            raise RuntimeError('Paginazione cambiata o non consecutiva. Risultato parziale.')
+                        new_rows, new_local = [], 0
+                        for row in state['rows']:
+                            if not row['name']:
+                                raise RuntimeError('Template di una carta non ancora caricato.')
+                            key = product_key(row)
+                            old = records.get(key)
+                            if old and (old['image'], old['name']) != (row['image'], row['name']):
+                                raise RuntimeError(f'Identificatore ambiguo: {key}. Nessuna fusione automatica.')
+                            if key not in query_seen:
+                                new_local += 1
+                                query_seen.add(key)
+                            if key not in records:
+                                new_rows.append(row)
+                            records[key] = row
+                        if new_local == 0:
+                            raise RuntimeError('Pagina senza carte nuove nella ricerca corrente.')
+                        item = {'Espansione ricercata': query['name'], 'Pagina': state['page'],
+                                'Pagine totali': expected_pages, 'Nuove carte': len(new_rows),
+                                'Carte nella ricerca': len(query_seen), 'Carte distinte cumulative': len(records),
+                                'Contatori sito': json.dumps(state['counters'], ensure_ascii=False)}
+                        log.append(item)
+                        query_log.update(Pagine=expected_page, **{'Carte nella ricerca': len(query_seen)})
+                        journal.write(json.dumps({'pagina': item, 'righe': new_rows}, ensure_ascii=False) + '\n')
+                        journal.flush()
+                        print(f"  Pagina {state['page']}/{expected_pages} | ricerca {len(query_seen)} | totale distinto {len(records)}", flush=True)
+                        if state['page'] == expected_pages:
+                            break
+                        previous = fingerprint(state)
+                        page.locator(MORE).wait_for(state='visible', timeout=timeout * 1000)
+                        page.locator(MORE).click()
+                        expected_page += 1
+                        for attempt in range(3):
+                            try:
+                                state = wait_ready(page, timeout, previous, expected_page, edition)
+                                break
+                            except RuntimeError:
+                                if attempt == 2:
+                                    raise
+                                print('Caricamento lento: attendo ancora senza cliccare due volte.', flush=True)
+                        if not state['rows']:
+                            raise RuntimeError('Pagina vuota prima della fine prevista.')
+                    query_log['Stato'] = 'COMPLETATA'
+                    journal.write(json.dumps({'ricerca_completata': query_log}, ensure_ascii=False) + '\n')
                     journal.flush()
-                    print(f"Pagina {state['page']}/{state['pages']} | +{added} carte | totale {len(records)}", flush=True)
-                    if state['page'] == state['pages']:
-                        break
-                    more = page.locator(MORE)
-                    more.wait_for(state='visible', timeout=timeout * 1000)
-                    previous = fingerprint(state)
-                    # Nessun limite a 45/60 carte, nessuno scroll e nessun tetto arbitrario di pagine.
-                    more.click()
-                    last_state = wait_ready(page, timeout, previous, state['page'] + 1)
-            save_excel(output, records, log, complete=True)
-            print(f'ESTRAZIONE COMPLETATA: {len(records)} carte, {len(log)} pagine. File: {output}', flush=True)
+                    # Il giornale viene aggiornato dopo ogni pagina; ogni dieci
+                    # ricerche si aggiorna anche la copia Excel parziale.
+                    if (query_index + 1) % 10 == 0:
+                        save_excel(partial, records, log, False, queries_log=queries_log)
+            if len(queries_log) != len(queries) or any(q['Stato'] != 'COMPLETATA' for q in queries_log):
+                raise RuntimeError('Non tutte le espansioni sono state completate.')
+            final_editions = page.evaluate(READ_STATE)['editions']
+            if {q['id'] for q in editions} != {q['id'] for q in final_editions}:
+                raise RuntimeError('Elenco espansioni cambiato durante la scansione: ripetere.')
+            if not records:
+                raise RuntimeError('Nessuna carta estratta.')
+            save_excel(output, records, log, True, queries_log=queries_log)
+            partial.unlink(missing_ok=True)
+            print(f'ESTRAZIONE COMPLETATA: {len(records)} carte, {len(log)} pagine, {len(editions)} espansioni. File: {output}', flush=True)
         except Exception as exc:
             if records:
-                save_excel(partial, records, log, complete=False, error=str(exc))
+                save_excel(partial, records, log, False, str(exc), queries_log)
                 print(f'SALVATO SOLO IL PARZIALE: {partial}', file=sys.stderr, flush=True)
-            page.screenshot(path=str(output.with_suffix('.errore.png')), full_page=False)
+            diagnostic = {'version': VERSION, 'url': URL, 'error': str(exc),
+                          'cards': len(records), 'queries': queries_log,
+                          'timestamp_utc': datetime.now(timezone.utc).isoformat()}
+            output.with_suffix('.errore.json').write_text(json.dumps(diagnostic, ensure_ascii=False, indent=2), encoding='utf-8')
+            try:
+                page.screenshot(path=str(output.with_suffix('.errore.png')), full_page=False)
+            except Exception:
+                pass
             raise
         finally:
             browser.close()
