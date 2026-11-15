@@ -15,6 +15,10 @@ on:
         description: 'Solo con publish_only: importa il PARZIALE nelle schede CGC_PARZIALE_'
         type: boolean
         default: false
+      resume_scrape_run_id:
+        description: 'Riprendi la raccolta dal checkpoint di questo run (lascia publish_only spento)'
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -78,6 +82,27 @@ jobs:
           run-id: ${{ inputs.source_run_id }}
           path: .
 
+      - name: Controlla richiesta di ripresa
+        if: inputs.resume_scrape_run_id != ''
+        env:
+          RESUME_RUN_ID: ${{ inputs.resume_scrape_run_id }}
+          PUBLISH_ONLY: ${{ inputs.publish_only }}
+        shell: bash
+        run: |
+          if [[ ! "$RESUME_RUN_ID" =~ ^[0-9]+$ || "$PUBLISH_ONLY" == 'true' ]]; then
+            echo 'La ripresa richiede un ID numerico e publish_only disattivato.'
+            exit 1
+          fi
+
+      - name: Recupera checkpoint della raccolta
+        if: inputs.resume_scrape_run_id != '' && !inputs.publish_only
+        uses: actions/download-artifact@v4
+        with:
+          name: Buylist-Pokemon-Diagnostica
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.resume_scrape_run_id }}
+          path: resume_data
+
       - name: Installa Chromium
         if: ${{ !inputs.publish_only }}
         run: |
@@ -86,8 +111,16 @@ jobs:
       - name: Esegui lo scraper
         id: scrape
         if: ${{ !inputs.publish_only }}
+        env:
+          RESUME_RUN_ID: ${{ inputs.resume_scrape_run_id }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
         shell: bash
-        run: python -u scraper.py 2>&1 | tee scrape.log
+        run: |
+          if [[ -n "$RESUME_RUN_ID" ]]; then
+            python -u scraper.py --live-sheets --resume-checkpoint resume_data/CardGameCorner_Buylist_Pokemon_Completa.checkpoint.jsonl 2>&1 | tee scrape.log
+          else
+            python -u scraper.py --live-sheets 2>&1 | tee scrape.log
+          fi
 
       - name: Importa automaticamente in Google Sheets
         id: sheets
@@ -95,9 +128,12 @@ jobs:
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           USE_PARTIAL: ${{ inputs.publish_only && inputs.partial_data }}
+          PUBLISH_ONLY: ${{ inputs.publish_only }}
         shell: bash
         run: |
-          if [[ "$USE_PARTIAL" == 'true' ]]; then
+          if [[ "$PUBLISH_ONLY" != 'true' ]] && python -c "import json,os,pathlib; p=pathlib.Path('CardGameCorner_Buylist_Pokemon_Completa.live.status.json'); s=json.loads(p.read_text()) if p.exists() else {}; raise SystemExit(0 if s.get('state')=='COMPLETO' and s.get('run_id')==os.environ['GITHUB_RUN_ID'] else 1)"; then
+            echo 'Dataset completo già confermato in CGC_LIVE_Prezzi: non serve una seconda copia di milioni di celle.'
+          elif [[ "$USE_PARTIAL" == 'true' ]]; then
             python -u sheets_sync.py --partial --input CardGameCorner_Buylist_Pokemon_PARZIALE.xlsx 2>&1 | tee sheets.log
           else
             python -u sheets_sync.py 2>&1 | tee sheets.log
@@ -109,7 +145,9 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
         shell: bash
         run: |
-          if [[ -f CardGameCorner_Buylist_Pokemon_PARZIALE.xlsx ]]; then
+          if python -c "import json,os,pathlib; p=pathlib.Path('CardGameCorner_Buylist_Pokemon_Completa.live.status.json'); s=json.loads(p.read_text()) if p.exists() else {}; raise SystemExit(0 if s.get('state')=='PARZIALE' and s.get('run_id')==os.environ['GITHUB_RUN_ID'] else 1)"; then
+            echo 'Dati parziali già confermati in CGC_LIVE_Prezzi; stato PARZIALE in CGC_LIVE_Info.'
+          elif [[ -f CardGameCorner_Buylist_Pokemon_PARZIALE.xlsx ]]; then
             python -u sheets_sync.py --partial --input CardGameCorner_Buylist_Pokemon_PARZIALE.xlsx 2>&1 | tee sheets_partial.log
           else
             echo 'Lo scraper non ha prodotto dati parziali da importare.'
@@ -134,6 +172,7 @@ jobs:
             sheets.log
             sheets_partial.log
             *.checkpoint.jsonl
+            *.live.status.json
             *_PARZIALE.xlsx
             *.errore.json
             *.errore.png
