@@ -24,7 +24,7 @@ from playwright.sync_api import sync_playwright
 
 URL = "https://www.cardgamecorner.com/it/buylist-2026?game=pokemon"
 OUTPUT = "CardGameCorner_Buylist_Pokemon_Completa.xlsx"
-VERSION = "3.2.0"
+VERSION = "3.3.1"
 MORE = 'button[ng-click="showMore()"]'
 PRODUCT = '[ng-repeat="product in expansion.Products"]'
 
@@ -115,6 +115,7 @@ class SearchMonitor:
     """Distingue una risposta vuota riuscita da un errore di rete/HTTP."""
     def __init__(self, page):
         self.successful_json = 0
+        self.successful_responses = 0
         self.errors = []
         self.active = False
         page.on('response', self.response)
@@ -122,6 +123,7 @@ class SearchMonitor:
 
     def begin(self):
         self.successful_json = 0
+        self.successful_responses = 0
         self.errors = []
         self.active = True
 
@@ -134,8 +136,10 @@ class SearchMonitor:
             return
         if response.status >= 400:
             self.errors.append(f'HTTP {response.status}: {urlparse(response.url).path}')
-        elif 'json' in response.headers.get('content-type', '').lower():
-            self.successful_json += 1
+        else:
+            self.successful_responses += 1
+            if 'json' in response.headers.get('content-type', '').lower():
+                self.successful_json += 1
 
     def failed(self, request):
         if self.relevant(request):
@@ -168,10 +172,17 @@ def wait_ready(page, timeout, previous=None, expected_page=None, edition=None, r
             stable, since = None, None
             page.wait_for_timeout(250)
             continue
-        empty_response = (state['pages'] == 0 and state.get('data_empty') is True
-                          and monitor is not None and monitor.successful_json > 0)
-        response_ok = monitor is None or monitor.successful_json > 0
-        if (state['no_results'] or empty_response) and not state['rows'] and response_ok:
+        # TotalRecords è il contatore del risultato, mentre Expansions può
+        # restare un oggetto/valore precedente anche con zero risultati.
+        total_records = state.get('counters', {}).get('TotalRecords')
+        successful_responses = (getattr(monitor, 'successful_responses', 0)
+                                if monitor is not None else 0)
+        empty_response = (state['pages'] == 0 and total_records == 0
+                          and monitor is not None and successful_responses > 0)
+        response_ok = monitor is None or successful_responses > 0
+        text_empty = (state['no_results'] and state['pages'] == 0
+                      and total_records in (None, 0))
+        if (text_empty or empty_response) and not state['rows'] and response_ok:
             marker = ('empty', str(edition), state['page'], state['pages'])
             if marker != stable:
                 stable, since = marker, time.monotonic()
@@ -180,8 +191,9 @@ def wait_ready(page, timeout, previous=None, expected_page=None, edition=None, r
                 return state
             page.wait_for_timeout(250)
             continue
-        if state and state['rows'] and state['pending'] == 0 and edition_ok:
+        if state['rows'] and response_ok:
             if state['pages'] < 1 or state['page'] < 1:
+                stable, since = None, None
                 page.wait_for_timeout(250)
                 continue
             signature = fingerprint(state)
@@ -193,6 +205,9 @@ def wait_ready(page, timeout, previous=None, expected_page=None, edition=None, r
                     stable, since = marker, time.monotonic()
                 elif time.monotonic() - since >= 1.0:
                     return state
+                page.wait_for_timeout(250)
+                continue
+        stable, since = None, None
         last = state
         page.wait_for_timeout(250)
     detail = {k: last.get(k) for k in ('page', 'pages', 'pending')} if last else {}
@@ -413,6 +428,11 @@ def scrape(output, timeout=120, headed=False):
             diagnostic = {'version': VERSION, 'url': URL, 'error': str(exc),
                           'cards': len(records), 'queries': queries_log,
                           'timestamp_utc': datetime.now(timezone.utc).isoformat()}
+            diagnostic['network'] = {
+                'successful_responses': page._buylist_monitor.successful_responses,
+                'successful_json': page._buylist_monitor.successful_json,
+                'errors': page._buylist_monitor.errors,
+            }
             try:
                 diagnostic['page_state'] = page.evaluate(READ_STATE)
             except Exception as read_error:
