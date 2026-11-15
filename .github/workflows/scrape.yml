@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     env:
-      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID || '1SH8_HmCd5YV37woGIZUwemy_GLh6Y9Z_28OQf_B_Rlw' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
