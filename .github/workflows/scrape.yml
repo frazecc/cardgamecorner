@@ -1,0 +1,31 @@
+name: Estrai Buylist CardGameCorner
+
+on:
+  workflow_dispatch: # Ti permette di avviarlo manualmente con un clic
+
+jobs:
+  run-scraper:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Installa dipendenze
+        run: |
+          pip install playwright pandas openpyxl
+          playwright install chromium
+          playwright install-deps
+
+      - name: Esegui lo scraper
+        run: python scraper.py
+
+      - name: Carica il file Excel nei risultati
+        uses: actions/upload-artifact@v4
+        with:
+          name: Buylist-Pokemon-Excel
+          path: CardGameCorner_Buylist_Completa.xlsx
