@@ -68,6 +68,37 @@ class WaitTests(unittest.TestCase):
             scraper.validate_state(state(filters={'edition': 2364}))
         scraper.validate_state(state(filters={'edition': '2364'}), 2364)
 
+    def test_zero_pages_without_message_is_valid_after_response(self):
+        from types import SimpleNamespace
+        page = FakePage([state(page=1, pages=0, rows=[], no_results=False, data_empty=True)])
+        page._buylist_monitor = SimpleNamespace(errors=[], successful_json=1)
+        result = self.wait(page)
+        self.assertTrue(result['empty_confirmed'])
+        scraper.validate_state(result)
+        self.assertGreaterEqual(page.clock, 2)
+
+    def test_zero_pages_without_response_is_not_valid(self):
+        from types import SimpleNamespace
+        page = FakePage([state(page=1, pages=0, rows=[], no_results=False, data_empty=True)])
+        page._buylist_monitor = SimpleNamespace(errors=[], successful_json=0)
+        with self.assertRaises(RuntimeError):
+            self.wait(page)
+
+    def test_http_failure_is_not_treated_as_empty(self):
+        from types import SimpleNamespace
+        page = FakePage([state(pages=0, rows=[], no_results=True, data_empty=True)])
+        page._buylist_monitor = SimpleNamespace(errors=['HTTP 500'], successful_json=0)
+        with self.assertRaisesRegex(RuntimeError, 'HTTP 500'):
+            self.wait(page)
+
+    def test_zero_page_during_render_does_not_finish_early(self):
+        from types import SimpleNamespace
+        page = FakePage([state(pages=0, rows=[], data_empty=True), state()])
+        page._buylist_monitor = SimpleNamespace(errors=[], successful_json=1)
+        result = self.wait(page)
+        self.assertTrue(result['rows'])
+        self.assertFalse(result.get('empty_confirmed', False))
+
 
 if __name__ == '__main__':
     unittest.main()
