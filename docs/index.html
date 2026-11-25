@@ -15,7 +15,7 @@
 
   <section class="filters">
     <div class="filter-row">
-      <input id="name" type="text" placeholder="Nome carta..." />
+      <input id="name" type="text" placeholder="Nome carta (es. Charizard)..." />
       <input id="expansion" type="text" placeholder="Espansione..." />
       <input id="serial" type="text" placeholder="Numero / Serial..." />
     </div>
@@ -23,53 +23,39 @@
     <div class="filter-row">
       <select id="language">
         <option value="">Tutte le lingue</option>
-        <option value="Italian">Italian</option>
+        <option value="Italiano">Italiano</option>
         <option value="English">English</option>
-        <option value="Japanese">Japanese</option>
         <option value="German">German</option>
         <option value="French">French</option>
         <option value="Spanish">Spanish</option>
-        <option value="Portuguese">Portuguese</option>
-        <option value="Korean">Korean</option>
-        <option value="Chinese">Chinese</option>
+        <option value="Japanese">Japanese</option>
       </select>
 
       <select id="condition">
         <option value="">Tutte le condizioni</option>
-        <option value="Near Mint">Near Mint</option>
-        <option value="Lightly Played">Lightly Played</option>
-        <option value="Moderately Played">Moderately Played</option>
-        <option value="Heavily Played">Heavily Played</option>
-        <option value="Damaged">Damaged</option>
-        <option value="Excellent">Excellent</option>
-        <option value="Good">Good</option>
-        <option value="Poor">Poor</option>
+        <option value="NM/M">NM/M (Near Mint / Mint)</option>
+        <option value="SP">SP (Slightly Played)</option>
+        <option value="HP">HP (Heavily Played)</option>
+        <option value="D">D (Damaged)</option>
       </select>
 
       <select id="foil">
         <option value="">Foil / non foil</option>
-        <option value="Yes">Foil / Holo</option>
-        <option value="No">Non foil</option>
         <option value="Reverse Holo">Reverse Holo</option>
       </select>
 
-      <select id="firstEdition">
-        <option value="">1ª edizione</option>
-        <option value="Yes">Sì</option>
-        <option value="No">No</option>
+      <select id="status">
+        <option value="">Tutti gli stati</option>
+        <option value="PREZZO DISPONIBILE">Prezzo disponibile</option>
+        <option value="VALUTAZIONE SU RICHIESTA">Valutazione su richiesta</option>
+        <option value="SENZA PREZZO BUYLIST">Senza prezzo</option>
+        <option value="ESCLUSA DALLA BUYLIST">Esclusa</option>
       </select>
     </div>
 
     <div class="filter-row">
       <input id="minBuylist" type="number" step="0.01" placeholder="Buylist min €" />
       <input id="maxBuylist" type="number" step="0.01" placeholder="Buylist max €" />
-      <select id="status">
-        <option value="">Tutti gli stati</option>
-        <option value="PREZZO DISPONIBILE">Prezzo disponibile</option>
-        <option value="VALUTAZIONE SU RICHIESTA">Valutazione su richiesta</option>
-        <option value="ESCLUSA DALLA BUYLIST">Esclusa</option>
-        <option value="SENZA PREZZO BUYLIST">Senza prezzo</option>
-      </select>
       <select id="sort">
         <option value="">Ordine predefinito</option>
         <option value="buylist_desc">Prezzo più alto</option>
@@ -82,7 +68,7 @@
   </section>
 
   <div class="toolbar">
-    <span id="info">Pronto — usa i filtri per cercare (consigliato: nome o prezzo minimo)</span>
+    <span id="info">Pronto — usa i filtri (consigliato partire da nome o prezzo minimo)</span>
     <div class="pagination">
       <button id="prev" disabled>← Precedente</button>
       <span id="pageInfo">Pagina 1</span>
@@ -123,7 +109,6 @@
 
     const PAGE_SIZE = 50;
     let currentPage = 0;
-    let totalCount = 0;
     let hasMore = false;
 
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -136,7 +121,6 @@
         language: document.getElementById('language').value,
         condition: document.getElementById('condition').value,
         foil: document.getElementById('foil').value,
-        firstEdition: document.getElementById('firstEdition').value,
         minBuylist: document.getElementById('minBuylist').value,
         maxBuylist: document.getElementById('maxBuylist').value,
         status: document.getElementById('status').value,
@@ -146,11 +130,10 @@
 
     function hasAnyFilter(f) {
       return !!(f.name || f.expansion || f.serial || f.language || f.condition ||
-                f.foil || f.firstEdition || f.minBuylist || f.maxBuylist || f.status);
+                f.foil || f.minBuylist || f.maxBuylist || f.status);
     }
 
     function buildQuery(filters) {
-      // Non chiediamo count=exact di default (è lento su dataset grandi)
       let q = sb
         .from('cgc_buylist')
         .select(
@@ -158,18 +141,17 @@
         )
         .range(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE - 1);
 
-      if (filters.name) q = q.ilike('name', `%${filters.name}%`);
-      if (filters.expansion) q = q.ilike('expansion', `%${filters.expansion}%`);
-      if (filters.serial) q = q.ilike('serial_number', `%${filters.serial}%`);
+      if (filters.name) q = q.ilike('name', '%' + filters.name + '%');
+      if (filters.expansion) q = q.ilike('expansion', '%' + filters.expansion + '%');
+      if (filters.serial) q = q.ilike('serial_number', '%' + filters.serial + '%');
       if (filters.language) q = q.eq('language', filters.language);
       if (filters.condition) q = q.eq('condition', filters.condition);
       if (filters.foil) q = q.eq('foil', filters.foil);
-      if (filters.firstEdition) q = q.eq('first_edition', filters.firstEdition);
       if (filters.minBuylist) q = q.gte('buylist', filters.minBuylist);
       if (filters.maxBuylist) q = q.lte('buylist', filters.maxBuylist);
       if (filters.status) q = q.eq('status', filters.status);
 
-      // Ordinamento solo se c'è almeno un filtro (altrimenti timeout)
+      // Ordinamento solo se c'è almeno un filtro (evita timeout)
       if (hasAnyFilter(filters) && filters.sort) {
         if (filters.sort === 'buylist_desc') q = q.order('buylist', { ascending: false });
         else if (filters.sort === 'buylist_asc') q = q.order('buylist', { ascending: true });
@@ -189,14 +171,17 @@
         const { data, error } = await buildQuery(filters);
 
         if (error) {
-          document.getElementById('info').textContent = 'Errore: ' + error.message;
+          let msg = error.message || 'Errore sconosciuto';
+          if (msg.includes('timeout') || msg.includes('canceling')) {
+            msg = 'Timeout: la ricerca è troppo ampia. Aggiungi un filtro più selettivo (nome, prezzo minimo, lingua...).';
+          }
+          document.getElementById('info').textContent = 'Errore: ' + msg;
           console.error(error);
           return;
         }
 
         const rows = data || [];
         hasMore = rows.length === PAGE_SIZE;
-        totalCount = currentPage * PAGE_SIZE + rows.length + (hasMore ? 1 : 0); // stima
 
         renderTable(rows);
         updatePagination(rows.length);
@@ -215,25 +200,23 @@
 
       tbody.innerHTML = rows.map(r => {
         const img = r.image
-          ? `<img src="${r.image}" alt="" loading="lazy" class="thumb" onerror="this.style.display='none'">`
+          ? '<img src="' + r.image + '" alt="" loading="lazy" class="thumb" onerror="this.style.display=\'none\'">'
           : '';
-        return `
-          <tr>
-            <td class="img-cell">${img}</td>
-            <td>
-              <strong>${escapeHtml(r.name || '')}</strong>
-              ${r.name_en && r.name_en !== r.name ? `<br><small>${escapeHtml(r.name_en)}</small>` : ''}
-            </td>
-            <td>${escapeHtml(r.expansion || '')}</td>
-            <td>${escapeHtml(r.serial_number || '')}</td>
-            <td>${escapeHtml(r.language || '')}</td>
-            <td>${escapeHtml(r.condition || '')}</td>
-            <td>${escapeHtml(r.foil || '')}</td>
-            <td>${escapeHtml(r.first_edition || '')}</td>
-            <td class="num">${formatPrice(r.buylist)}</td>
-            <td class="num">${formatPrice(r.credit)}</td>
-            <td><span class="status ${statusClass(r.status)}">${escapeHtml(r.status || '')}</span></td>
-          </tr>`;
+        return '<tr>' +
+          '<td class="img-cell">' + img + '</td>' +
+          '<td><strong>' + escapeHtml(r.name || '') + '</strong>' +
+            (r.name_en && r.name_en !== r.name ? '<br><small>' + escapeHtml(r.name_en) + '</small>' : '') +
+          '</td>' +
+          '<td>' + escapeHtml(r.expansion || '') + '</td>' +
+          '<td>' + escapeHtml(r.serial_number || '') + '</td>' +
+          '<td>' + escapeHtml(r.language || '') + '</td>' +
+          '<td>' + escapeHtml(r.condition || '') + '</td>' +
+          '<td>' + escapeHtml(r.foil || '') + '</td>' +
+          '<td>' + escapeHtml(r.first_edition || '') + '</td>' +
+          '<td class="num">' + formatPrice(r.buylist) + '</td>' +
+          '<td class="num">' + formatPrice(r.credit) + '</td>' +
+          '<td><span class="status ' + statusClass(r.status) + '">' + escapeHtml(r.status || '') + '</span></td>' +
+        '</tr>';
       }).join('');
     }
 
@@ -243,8 +226,8 @@
       document.getElementById('info').textContent =
         rowsOnPage === 0
           ? 'Nessun risultato'
-          : `Mostrati ${from}–${to}${hasMore ? ' (ci sono altri risultati)' : ''}`;
-      document.getElementById('pageInfo').textContent = `Pagina ${currentPage + 1}`;
+          : 'Mostrati ' + from + '–' + to + (hasMore ? ' (ci sono altri risultati)' : '');
+      document.getElementById('pageInfo').textContent = 'Pagina ' + (currentPage + 1);
       document.getElementById('prev').disabled = currentPage === 0;
       document.getElementById('next').disabled = !hasMore;
     }
@@ -271,22 +254,22 @@
     }
 
     // Eventi
-    document.getElementById('btnSearch').onclick = () => search(true);
-    document.getElementById('btnReset').onclick = () => {
-      document.querySelectorAll('.filters input, .filters select').forEach(el => {
+    document.getElementById('btnSearch').onclick = function() { search(true); };
+    document.getElementById('btnReset').onclick = function() {
+      document.querySelectorAll('.filters input, .filters select').forEach(function(el) {
         if (el.tagName === 'SELECT') el.selectedIndex = 0;
         else el.value = '';
       });
       search(true);
     };
-    document.getElementById('prev').onclick = () => { currentPage--; search(false); };
-    document.getElementById('next').onclick = () => { currentPage++; search(false); };
+    document.getElementById('prev').onclick = function() { currentPage--; search(false); };
+    document.getElementById('next').onclick = function() { currentPage++; search(false); };
 
-    document.querySelectorAll('.filters input').forEach(inp => {
-      inp.addEventListener('keydown', e => { if (e.key === 'Enter') search(true); });
+    document.querySelectorAll('.filters input').forEach(function(inp) {
+      inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') search(true); });
     });
 
-    // Prima caricamento leggero (senza filtri e senza ordinamento)
+    // Prima caricamento leggero
     search(true);
   </script>
 </body>
