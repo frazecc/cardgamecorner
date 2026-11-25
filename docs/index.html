@@ -3,14 +3,17 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CardGameCorner Buylist</title>
+  <title>CardGameCorner · Cash &amp; Buono</title>
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
   <header>
-    <h1>CardGameCorner Buylist</h1>
-    <p class="subtitle">Dati pubblici da Supabase · aggiornamento automatico mentre digiti</p>
+    <h1>CardGameCorner — Cash &amp; Buono</h1>
+    <p class="subtitle">
+      <strong>Cash</strong> = soldi che ti offrono per la carta &nbsp;·&nbsp;
+      <strong>Buono</strong> = credito da spendere nel loro negozio
+    </p>
   </header>
 
   <section class="filters">
@@ -20,46 +23,47 @@
       <input id="serial" type="text" placeholder="Numero / Serial..." />
     </div>
 
-    <div class="filter-row">
-      <select id="language">
-        <option value="">Tutte le lingue</option>
-        <option value="Italiano">Italiano</option>
-        <option value="English">English</option>
-        <option value="German">German</option>
-        <option value="French">French</option>
-        <option value="Spanish">Spanish</option>
-        <option value="Japanese">Japanese</option>
-      </select>
+    <div class="filter-row check-groups">
+      <fieldset class="check-group">
+        <legend>Lingua</legend>
+        <label><input type="checkbox" name="language" value="Italiano"> Italiano</label>
+        <label><input type="checkbox" name="language" value="English"> English</label>
+        <label><input type="checkbox" name="language" value="German"> German</label>
+        <label><input type="checkbox" name="language" value="French"> French</label>
+        <label><input type="checkbox" name="language" value="Spanish"> Spanish</label>
+        <label><input type="checkbox" name="language" value="Japanese"> Japanese</label>
+      </fieldset>
 
-      <select id="condition">
-        <option value="">Tutte le condizioni</option>
-        <option value="NM/M">NM/M (Near Mint / Mint)</option>
-        <option value="SP">SP (Slightly Played)</option>
-        <option value="HP">HP (Heavily Played)</option>
-        <option value="D">D (Damaged)</option>
-      </select>
+      <fieldset class="check-group">
+        <legend>Condizione</legend>
+        <label><input type="checkbox" name="condition" value="NM/M"> NM/M</label>
+        <label><input type="checkbox" name="condition" value="SP"> SP</label>
+        <label><input type="checkbox" name="condition" value="HP"> HP</label>
+        <label><input type="checkbox" name="condition" value="D"> D</label>
+      </fieldset>
 
-      <select id="foil">
-        <option value="">Foil / non foil</option>
-        <option value="Reverse Holo">Reverse Holo</option>
-      </select>
+      <fieldset class="check-group">
+        <legend>Foil</legend>
+        <label><input type="checkbox" name="foil" value="Reverse Holo"> Reverse Holo</label>
+      </fieldset>
 
-      <select id="status">
-        <option value="">Tutti gli stati</option>
-        <option value="PREZZO DISPONIBILE">Prezzo disponibile</option>
-        <option value="VALUTAZIONE SU RICHIESTA">Valutazione su richiesta</option>
-        <option value="SENZA PREZZO BUYLIST">Senza prezzo</option>
-        <option value="ESCLUSA DALLA BUYLIST">Esclusa</option>
-      </select>
+      <fieldset class="check-group">
+        <legend>Stato offerta</legend>
+        <label><input type="checkbox" name="status" value="PREZZO DISPONIBILE"> Prezzo disponibile</label>
+        <label><input type="checkbox" name="status" value="VALUTAZIONE SU RICHIESTA"> Valutazione su richiesta</label>
+        <label><input type="checkbox" name="status" value="SENZA PREZZO BUYLIST"> Senza prezzo</label>
+        <label><input type="checkbox" name="status" value="ESCLUSA DALLA BUYLIST"> Esclusa</label>
+      </fieldset>
     </div>
 
     <div class="filter-row">
-      <input id="minBuylist" type="number" step="0.01" placeholder="Buylist min €" />
-      <input id="maxBuylist" type="number" step="0.01" placeholder="Buylist max €" />
+      <input id="minCash" type="number" step="0.01" placeholder="Cash min €" />
+      <input id="maxCash" type="number" step="0.01" placeholder="Cash max €" />
       <select id="sort">
-        <option value="buylist_desc">Prezzo ↓ (pagina corrente)</option>
-        <option value="buylist_asc">Prezzo ↑ (pagina corrente)</option>
-        <option value="name_asc">Nome A-Z (pagina corrente)</option>
+        <option value="cash_desc">Cash ↓ (pagina)</option>
+        <option value="cash_asc">Cash ↑ (pagina)</option>
+        <option value="buono_desc">Buono ↓ (pagina)</option>
+        <option value="name_asc">Nome A-Z (pagina)</option>
         <option value="">Come arriva dal DB</option>
       </select>
       <button id="btnReset" class="secondary">Reset filtri</button>
@@ -87,8 +91,8 @@
           <th>Condizione</th>
           <th>Foil</th>
           <th>1ª</th>
-          <th class="num">Buylist</th>
-          <th class="num">Credit</th>
+          <th class="num">Cash</th>
+          <th class="num">Buono</th>
           <th>Stato</th>
         </tr>
       </thead>
@@ -99,40 +103,49 @@
   <footer>
     <p>
       Vista pubblica <code>cgc_buylist</code> · solo lettura<br>
-      <small>L’ordinamento per prezzo vale solo sulla pagina attuale (il database non supporta ancora un ordinamento globale veloce).</small>
+      <small>
+        <strong>Cash</strong> = denaro offerto &nbsp;·&nbsp;
+        <strong>Buono</strong> = credito negozio &nbsp;·&nbsp;
+        L’ordinamento vale sulla pagina corrente (il DB non regge ancora un ordinamento globale veloce).
+      </small>
     </p>
   </footer>
 
   <script>
     const SUPABASE_URL = 'https://tjdmspsbcvyvmvxvqjop.supabase.co';
     const SUPABASE_ANON_KEY = 'sb_publishable_qPV-hACz7ru0agM5aNW_XQ_d_CKbyER';
-
     const PAGE_SIZE = 50;
+
     let currentPage = 0;
     let hasMore = false;
     let lastRowsCount = 0;
+    let knownTotal = null; // valorizzato quando siamo sull'ultima pagina
     let debounceTimer = null;
-    let searchId = 0; // evita risposte vecchie fuori ordine
+    let searchId = 0;
 
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    function checkedValues(name) {
+      return Array.from(document.querySelectorAll('input[name="' + name + '"]:checked'))
+        .map(function(el) { return el.value; });
+    }
 
     function getFilters() {
       return {
         name: document.getElementById('name').value.trim(),
         expansion: document.getElementById('expansion').value.trim(),
         serial: document.getElementById('serial').value.trim(),
-        language: document.getElementById('language').value,
-        condition: document.getElementById('condition').value,
-        foil: document.getElementById('foil').value,
-        minBuylist: document.getElementById('minBuylist').value,
-        maxBuylist: document.getElementById('maxBuylist').value,
-        status: document.getElementById('status').value,
+        languages: checkedValues('language'),
+        conditions: checkedValues('condition'),
+        foils: checkedValues('foil'),
+        statuses: checkedValues('status'),
+        minCash: document.getElementById('minCash').value,
+        maxCash: document.getElementById('maxCash').value,
         sort: document.getElementById('sort').value
       };
     }
 
     function buildQuery(filters) {
-      // Nessun order sul server: causa timeout
       var q = sb
         .from('cgc_buylist')
         .select(
@@ -143,12 +156,21 @@
       if (filters.name) q = q.ilike('name', '%' + filters.name + '%');
       if (filters.expansion) q = q.ilike('expansion', '%' + filters.expansion + '%');
       if (filters.serial) q = q.ilike('serial_number', '%' + filters.serial + '%');
-      if (filters.language) q = q.eq('language', filters.language);
-      if (filters.condition) q = q.eq('condition', filters.condition);
-      if (filters.foil) q = q.eq('foil', filters.foil);
-      if (filters.minBuylist) q = q.gte('buylist', filters.minBuylist);
-      if (filters.maxBuylist) q = q.lte('buylist', filters.maxBuylist);
-      if (filters.status) q = q.eq('status', filters.status);
+
+      if (filters.languages.length === 1) q = q.eq('language', filters.languages[0]);
+      else if (filters.languages.length > 1) q = q.in('language', filters.languages);
+
+      if (filters.conditions.length === 1) q = q.eq('condition', filters.conditions[0]);
+      else if (filters.conditions.length > 1) q = q.in('condition', filters.conditions);
+
+      if (filters.foils.length === 1) q = q.eq('foil', filters.foils[0]);
+      else if (filters.foils.length > 1) q = q.in('foil', filters.foils);
+
+      if (filters.statuses.length === 1) q = q.eq('status', filters.statuses[0]);
+      else if (filters.statuses.length > 1) q = q.in('status', filters.statuses);
+
+      if (filters.minCash) q = q.gte('buylist', filters.minCash);
+      if (filters.maxCash) q = q.lte('buylist', filters.maxCash);
 
       return q;
     }
@@ -156,14 +178,12 @@
     function sortClient(rows, sort) {
       if (!sort || !rows.length) return rows;
       var copy = rows.slice();
-      if (sort === 'buylist_desc') {
-        copy.sort(function(a, b) {
-          return (Number(b.buylist) || 0) - (Number(a.buylist) || 0);
-        });
-      } else if (sort === 'buylist_asc') {
-        copy.sort(function(a, b) {
-          return (Number(a.buylist) || 0) - (Number(b.buylist) || 0);
-        });
+      if (sort === 'cash_desc') {
+        copy.sort(function(a, b) { return (Number(b.buylist) || 0) - (Number(a.buylist) || 0); });
+      } else if (sort === 'cash_asc') {
+        copy.sort(function(a, b) { return (Number(a.buylist) || 0) - (Number(b.buylist) || 0); });
+      } else if (sort === 'buono_desc') {
+        copy.sort(function(a, b) { return (Number(b.credit) || 0) - (Number(a.credit) || 0); });
       } else if (sort === 'name_asc') {
         copy.sort(function(a, b) {
           return String(a.name || '').localeCompare(String(b.name || ''), 'it', { sensitivity: 'base' });
@@ -174,7 +194,10 @@
 
     async function search(resetPage) {
       if (resetPage === undefined) resetPage = true;
-      if (resetPage) currentPage = 0;
+      if (resetPage) {
+        currentPage = 0;
+        knownTotal = null;
+      }
 
       var myId = ++searchId;
       var filters = getFilters();
@@ -182,12 +205,12 @@
 
       try {
         var result = await buildQuery(filters);
-        if (myId !== searchId) return; // risposta vecchia, ignora
+        if (myId !== searchId) return;
 
         if (result.error) {
           var msg = result.error.message || 'Errore sconosciuto';
           if (msg.indexOf('timeout') !== -1 || msg.indexOf('canceling') !== -1) {
-            msg = 'Timeout: restringi la ricerca (nome o prezzo minimo).';
+            msg = 'Timeout: restringi la ricerca (nome o Cash minimo).';
           }
           document.getElementById('info').textContent = 'Errore: ' + msg;
           console.error(result.error);
@@ -197,6 +220,11 @@
         var rows = result.data || [];
         lastRowsCount = rows.length;
         hasMore = rows.length === PAGE_SIZE;
+
+        if (!hasMore) {
+          // ultima pagina → totale esatto
+          knownTotal = currentPage * PAGE_SIZE + rows.length;
+        }
 
         rows = sortClient(rows, filters.sort);
         renderTable(rows);
@@ -210,9 +238,7 @@
 
     function scheduleSearch() {
       clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(function() {
-        search(true);
-      }, 350);
+      debounceTimer = setTimeout(function() { search(true); }, 350);
     }
 
     function renderTable(rows) {
@@ -245,26 +271,30 @@
     }
 
     function updatePagination() {
+      var pageNum = currentPage + 1;
       var from = currentPage * PAGE_SIZE + (lastRowsCount ? 1 : 0);
       var to = currentPage * PAGE_SIZE + lastRowsCount;
-      var pageNum = currentPage + 1;
 
       var infoText;
+      var pageText;
+
       if (lastRowsCount === 0) {
         infoText = 'Nessun risultato';
+        pageText = 'Pagina 1';
+      } else if (knownTotal !== null) {
+        var totalPages = Math.max(1, Math.ceil(knownTotal / PAGE_SIZE));
+        infoText = 'Risultati ' + from + '–' + to + ' di ' + knownTotal.toLocaleString('it-IT');
+        pageText = 'Pagina ' + pageNum + ' di ' + totalPages;
       } else if (hasMore) {
-        // non conosciamo il totale esatto (conteggio troppo lento sul DB)
-        infoText = 'Risultati ' + from + '–' + to + ' · almeno ' + to + ' trovati · pagina ' + pageNum + ' (ce ne sono altre)';
+        infoText = 'Risultati ' + from + '–' + to + ' · almeno ' + to + ' trovati';
+        pageText = 'Pagina ' + pageNum + ' · altre pagine disponibili';
       } else {
-        // ultima pagina: totale esatto
-        var total = to;
-        var totalPages = pageNum;
-        infoText = 'Risultati ' + from + '–' + to + ' · totale ' + total.toLocaleString('it-IT') +
-          ' · ' + totalPages + (totalPages === 1 ? ' pagina' : ' pagine');
+        infoText = 'Risultati ' + from + '–' + to;
+        pageText = 'Pagina ' + pageNum;
       }
 
       document.getElementById('info').textContent = infoText;
-      document.getElementById('pageInfo').textContent = 'Pagina ' + pageNum;
+      document.getElementById('pageInfo').textContent = pageText;
       document.getElementById('prev').disabled = currentPage === 0;
       document.getElementById('next').disabled = !hasMore;
     }
@@ -290,23 +320,23 @@
         .replace(/"/g, '&quot;');
     }
 
-    // Aggiornamento in tempo reale
-    document.querySelectorAll('.filters input').forEach(function(el) {
+    // Live update
+    document.querySelectorAll('.filters input[type="text"], .filters input[type="number"]').forEach(function(el) {
       el.addEventListener('input', scheduleSearch);
     });
-    document.querySelectorAll('.filters select').forEach(function(el) {
-      el.addEventListener('change', function() {
-        // per sort: se è solo cambio ordinamento e abbiamo già dati, potremmo riordinare
-        // ma è più semplice rifare la search (veloce senza order server)
-        search(true);
-      });
+    document.querySelectorAll('.filters input[type="checkbox"]').forEach(function(el) {
+      el.addEventListener('change', function() { search(true); });
     });
+    document.getElementById('sort').addEventListener('change', function() { search(true); });
 
     document.getElementById('btnReset').onclick = function() {
-      document.querySelectorAll('.filters input, .filters select').forEach(function(el) {
-        if (el.tagName === 'SELECT') el.selectedIndex = 0;
-        else el.value = '';
+      document.querySelectorAll('.filters input[type="text"], .filters input[type="number"]').forEach(function(el) {
+        el.value = '';
       });
+      document.querySelectorAll('.filters input[type="checkbox"]').forEach(function(el) {
+        el.checked = false;
+      });
+      document.getElementById('sort').selectedIndex = 0;
       search(true);
     };
 
