@@ -185,10 +185,12 @@
     }
 
     function buildQuery(filters) {
+      // count:exact per totale pagine (funziona sui filtri "con prezzo")
       var q = sb
         .from('cgc_buylist')
         .select(
-          'name, name_en, expansion, serial_number, image, language, condition, foil, first_edition, buylist, credit, status'
+          'name, name_en, expansion, serial_number, image, language, condition, foil, first_edition, buylist, credit, status',
+          { count: 'exact' }
         )
         .range(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE - 1);
 
@@ -215,6 +217,20 @@
 
       if (filters.minCash) q = q.gte('buylist', filters.minCash);
       if (filters.minBuono) q = q.gte('credit', filters.minBuono);
+
+      // Ordinamento SERVER: Cash (buylist) ok; Buono (credit) da solo ancora lento →
+      // usiamo credit solo se c'è un filtro selettivo (nome), altrimenti buylist
+      var sort = filters.sort;
+      var hasName = !!filters.name;
+      if (sort === 'cash_desc') q = q.order('buylist', { ascending: false });
+      else if (sort === 'cash_asc') q = q.order('buylist', { ascending: true });
+      else if (sort === 'buono_desc') {
+        if (hasName) q = q.order('credit', { ascending: false });
+        else q = q.order('buylist', { ascending: false }); // proxy globale finché manca indice su credit
+      } else if (sort === 'buono_asc') {
+        if (hasName) q = q.order('credit', { ascending: true });
+        else q = q.order('buylist', { ascending: true });
+      } else if (sort === 'name_asc') q = q.order('name', { ascending: true });
 
       return q;
     }
@@ -265,10 +281,18 @@
 
         var rows = result.data || [];
         lastRowsCount = rows.length;
-        hasMore = rows.length === PAGE_SIZE;
-        if (!hasMore) knownTotal = currentPage * PAGE_SIZE + rows.length;
+        if (typeof result.count === 'number' && result.count >= 0) {
+          knownTotal = result.count;
+          hasMore = (currentPage + 1) * PAGE_SIZE < knownTotal;
+        } else {
+          hasMore = rows.length === PAGE_SIZE;
+          if (!hasMore) knownTotal = currentPage * PAGE_SIZE + rows.length;
+        }
 
-        rows = sortClient(rows, filters.sort);
+        // Riordino client solo se ordinamento Buono senza nome (server ha usato buylist)
+        if ((filters.sort === 'buono_desc' || filters.sort === 'buono_asc') && !filters.name) {
+          rows = sortClient(rows, filters.sort);
+        }
         renderTable(rows);
         updatePagination();
       } catch (err) {
