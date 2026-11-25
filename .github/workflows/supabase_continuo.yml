@@ -1,0 +1,90 @@
+name: Scanner continuo CardGameCorner
+
+# Scansione 24/7: ogni run lavora circa 5 ore e un quarto (carta per carta,
+# partendo dalle ricerche controllate da piu tempo), poi si riavvia da solo
+# prima del limite di 6 ore di GitHub. Ogni pagina letta e salvata subito su Supabase.
+#
+# INTERRUTTORE 24/7: Settings -> Secrets and variables -> Actions -> Variables.
+#   SCANNER_ATTIVO = true   -> la catena si riavvia da sola (e la rete di sicurezza ogni 30 minuti e attiva)
+#   SCANNER_ATTIVO = false (o assente) -> fermo: restano possibili solo avvii manuali
+# Servono anche la variabile SUPABASE_URL e il secret SUPABASE_SERVICE_ROLE_KEY.
+
+on:
+  workflow_dispatch:
+    inputs:
+      prova:
+        description: 'Prova: completa UNA sola ricerca, poi si ferma senza riavviarsi'
+        type: boolean
+        default: false
+  schedule:
+    # Rete di sicurezza: se la catena si interrompe, riparte entro mezz'ora.
+    # Se un run e gia in corso, questo resta in coda e non crea doppioni.
+    - cron: '7,37 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cardgamecorner-continuo
+  cancel-in-progress: false
+
+jobs:
+  scansione:
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.SCANNER_ATTIVO == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    env:
+      SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      PROVA: ${{ github.event_name == 'workflow_dispatch' && inputs.prova }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Installa dipendenze
+        run: python -m pip install -r requirements.txt
+      - name: Verifica codice e configurazione
+        run: |
+          if [[ -z "$SUPABASE_URL" ]]; then
+            echo 'Crea la variabile GitHub SUPABASE_URL (Settings > Secrets and variables > Actions > Variables).'
+            exit 1
+          fi
+          python -m unittest discover -s tests -q
+          python -c 'import os; from supabase_sync import SupabaseClient; SupabaseClient(os.environ["SUPABASE_URL"], os.environ.get("SUPABASE_SERVICE_ROLE_KEY", ""))'
+      - name: Installa Chromium
+        run: python -m playwright install --with-deps chromium
+      - name: Scansione continua
+        run: |
+          if [[ "$PROVA" == 'true' ]]; then
+            python -u continuo.py --max-ricerche 1 2>&1 | tee continuo.log
+          else
+            python -u continuo.py --max-runtime 19000 2>&1 | tee continuo.log
+          fi
+      - name: Conserva il log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Scanner-continuo-log
+          path: continuo.log
+          retention-days: 7
+          if-no-files-found: warn
+
+  riavvia:
+    needs: scansione
+    # Parte anche se la scansione e fallita (dopo 15 minuti di pausa), mai se e stata annullata a mano,
+    # se l'interruttore SCANNER_ATTIVO non e true o se questa era una prova.
+    if: ${{ !cancelled() && vars.SCANNER_ATTIVO == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.prova) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Pausa dopo un errore
+        if: ${{ needs.scansione.result != 'success' }}
+        run: sleep 900
+      - name: Avvia il prossimo ciclo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run supabase_continuo.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME"
