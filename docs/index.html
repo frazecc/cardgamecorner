@@ -60,31 +60,33 @@
           <option value="">Senza ordine</option>
         </select>
       </div>
-      <div class="field field-actions">
-        <label>&nbsp;</label>
-        <button type="button" class="action secondary" id="btnReset">Reset</button>
-      </div>
     </div>
 
     <div class="check-columns">
       <fieldset class="check-group">
         <legend>Lingua</legend>
-        <label><input type="checkbox" name="language" value="Italiano"> Italiano</label>
-        <label><input type="checkbox" name="language" value="English"> English</label>
-        <label><input type="checkbox" name="language" value="Japanese"> Japanese</label>
-        <label><input type="checkbox" name="language" value="German"> German</label>
-        <label><input type="checkbox" name="language" value="French"> French</label>
-        <label><input type="checkbox" name="language" value="Spanish"> Spanish</label>
-        <label><input type="checkbox" name="language" value="Portuguese"> Portuguese</label>
-        <label><input type="checkbox" name="language" value="Korean"> Korean</label>
-        <label><input type="checkbox" name="language" value="Chinese"> Chinese</label>
-        <label><input type="checkbox" name="language" value="Chinese Simplified"> Chinese Simplified</label>
-        <label><input type="checkbox" name="language" value="Chinese Traditional"> Chinese Traditional</label>
-        <label><input type="checkbox" name="language" value="Dutch"> Dutch</label>
-        <label><input type="checkbox" name="language" value="Indonesian"> Indonesian</label>
-        <label><input type="checkbox" name="language" value="Thai"> Thai</label>
-        <label><input type="checkbox" name="language" value="Polish"> Polish</label>
-        <label><input type="checkbox" name="language" value="Russian"> Russian</label>
+        <div class="lang-split">
+          <div>
+            <label><input type="checkbox" name="language" value="Italiano"> Italiano</label>
+            <label><input type="checkbox" name="language" value="English"> English</label>
+            <label><input type="checkbox" name="language" value="Japanese"> Japanese</label>
+            <label><input type="checkbox" name="language" value="Chinese"> Chinese</label>
+            <label><input type="checkbox" name="language" value="Chinese Simplified"> Chinese Simplified</label>
+            <label><input type="checkbox" name="language" value="Chinese Traditional"> Chinese Traditional</label>
+            <label><input type="checkbox" name="language" value="Korean"> Korean</label>
+          </div>
+          <div>
+            <label><input type="checkbox" name="language" value="Dutch"> Dutch</label>
+            <label><input type="checkbox" name="language" value="French"> French</label>
+            <label><input type="checkbox" name="language" value="German"> German</label>
+            <label><input type="checkbox" name="language" value="Indonesian"> Indonesian</label>
+            <label><input type="checkbox" name="language" value="Polish"> Polish</label>
+            <label><input type="checkbox" name="language" value="Portuguese"> Portuguese</label>
+            <label><input type="checkbox" name="language" value="Russian"> Russian</label>
+            <label><input type="checkbox" name="language" value="Spanish"> Spanish</label>
+            <label><input type="checkbox" name="language" value="Thai"> Thai</label>
+          </div>
+        </div>
       </fieldset>
 
       <fieldset class="check-group">
@@ -203,12 +205,9 @@
       if (filters.foils.length === 1) q = q.eq('foil', filters.foils[0]);
       else if (filters.foils.length > 1) q = q.in('foil', filters.foils);
 
-      // 1ª edizione: "First Edition" oppure stringa vuota
       if (filters.firstEditions.length === 1) {
         if (filters.firstEditions[0] === '__empty__') q = q.eq('first_edition', '');
         else q = q.eq('first_edition', filters.firstEditions[0]);
-      } else if (filters.firstEditions.length > 1) {
-        // sia Sì che No → non filtrare (tutto)
       }
 
       if (filters.statuses.length === 1) q = q.eq('status', filters.statuses[0]);
@@ -237,20 +236,6 @@
         });
       }
       return copy;
-    }
-
-    function applyDefaults() {
-      document.getElementById('name').value = '';
-      document.getElementById('expansion').value = '';
-      document.getElementById('serial').value = '';
-      document.getElementById('minCash').value = '0.01';
-      document.getElementById('minBuono').value = '0.01';
-      document.getElementById('sort').value = 'buono_desc';
-      document.querySelectorAll('.filters input[type="checkbox"]').forEach(function(el) {
-        el.checked = false;
-      });
-      var prezzo = document.querySelector('input[name="status"][value="PREZZO DISPONIBILE"]');
-      if (prezzo) prezzo.checked = true;
     }
 
     async function search(resetPage) {
@@ -410,10 +395,6 @@
     });
     document.getElementById('sort').addEventListener('change', function() { search(true); });
 
-    document.getElementById('btnReset').onclick = function() {
-      applyDefaults();
-      search(true);
-    };
     document.getElementById('prev').onclick = function() {
       if (currentPage > 0) { currentPage--; search(false); }
     };

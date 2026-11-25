@@ -97,8 +97,8 @@ body {
 
 .field-row {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-  gap: 0.45rem 0.55rem;
+  grid-template-columns: 1.4fr 1.2fr 1fr 0.85fr 0.85fr 1fr;
+  gap: 0.5rem 0.65rem;
   align-items: end;
 }
 
@@ -127,15 +127,9 @@ body {
   width: 100%;
 }
 
-.field-actions {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.4rem;
-}
-
 .check-columns {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: 1.6fr 0.7fr 0.7fr 0.7fr 1fr;
   gap: 0.5rem;
 }
 
@@ -170,6 +164,13 @@ body {
   accent-color: var(--primary);
   cursor: pointer;
   flex-shrink: 0;
+}
+
+/* Lingue: due semicolonne interne */
+.lang-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 0.75rem;
 }
 
 button.action {
@@ -254,12 +255,19 @@ th {
 .status.warn { background: var(--warn-bg); color: var(--warn-fg); }
 .status.bad { background: var(--bad-bg); color: var(--bad-fg); }
 
-@media (max-width: 1100px) {
-  .check-columns { grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 1000px) {
+  .field-row {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .check-columns {
+    grid-template-columns: 1fr 1fr;
+  }
 }
-@media (max-width: 700px) {
-  .check-columns { grid-template-columns: repeat(2, 1fr); }
-}
-@media (max-width: 480px) {
-  .check-columns { grid-template-columns: 1fr; }
+@media (max-width: 600px) {
+  .field-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .check-columns {
+    grid-template-columns: 1fr;
+  }
 }
