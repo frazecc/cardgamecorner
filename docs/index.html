@@ -70,13 +70,19 @@
         <option value="ESCLUSA DALLA BUYLIST">Esclusa</option>
         <option value="SENZA PREZZO BUYLIST">Senza prezzo</option>
       </select>
+      <select id="sort">
+        <option value="">Ordine predefinito</option>
+        <option value="buylist_desc">Prezzo più alto</option>
+        <option value="buylist_asc">Prezzo più basso</option>
+        <option value="name_asc">Nome A-Z</option>
+      </select>
       <button id="btnSearch">Cerca</button>
       <button id="btnReset" class="secondary">Reset</button>
     </div>
   </section>
 
   <div class="toolbar">
-    <span id="info">Pronto</span>
+    <span id="info">Pronto — usa i filtri per cercare (consigliato: nome o prezzo minimo)</span>
     <div class="pagination">
       <button id="prev" disabled>← Precedente</button>
       <span id="pageInfo">Pagina 1</span>
@@ -118,6 +124,7 @@
     const PAGE_SIZE = 50;
     let currentPage = 0;
     let totalCount = 0;
+    let hasMore = false;
 
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -132,18 +139,23 @@
         firstEdition: document.getElementById('firstEdition').value,
         minBuylist: document.getElementById('minBuylist').value,
         maxBuylist: document.getElementById('maxBuylist').value,
-        status: document.getElementById('status').value
+        status: document.getElementById('status').value,
+        sort: document.getElementById('sort').value
       };
     }
 
+    function hasAnyFilter(f) {
+      return !!(f.name || f.expansion || f.serial || f.language || f.condition ||
+                f.foil || f.firstEdition || f.minBuylist || f.maxBuylist || f.status);
+    }
+
     function buildQuery(filters) {
+      // Non chiediamo count=exact di default (è lento su dataset grandi)
       let q = sb
         .from('cgc_buylist')
         .select(
-          'name, name_en, expansion, serial_number, image, language, condition, foil, first_edition, buylist, credit, status',
-          { count: 'exact' }
+          'name, name_en, expansion, serial_number, image, language, condition, foil, first_edition, buylist, credit, status'
         )
-        .order('buylist', { ascending: false })
         .range(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE - 1);
 
       if (filters.name) q = q.ilike('name', `%${filters.name}%`);
@@ -157,6 +169,13 @@
       if (filters.maxBuylist) q = q.lte('buylist', filters.maxBuylist);
       if (filters.status) q = q.eq('status', filters.status);
 
+      // Ordinamento solo se c'è almeno un filtro (altrimenti timeout)
+      if (hasAnyFilter(filters) && filters.sort) {
+        if (filters.sort === 'buylist_desc') q = q.order('buylist', { ascending: false });
+        else if (filters.sort === 'buylist_asc') q = q.order('buylist', { ascending: true });
+        else if (filters.sort === 'name_asc') q = q.order('name', { ascending: true });
+      }
+
       return q;
     }
 
@@ -166,23 +185,31 @@
       const filters = getFilters();
       document.getElementById('info').textContent = 'Caricamento...';
 
-      const { data, error, count } = await buildQuery(filters);
+      try {
+        const { data, error } = await buildQuery(filters);
 
-      if (error) {
-        document.getElementById('info').textContent = 'Errore: ' + error.message;
-        console.error(error);
-        return;
+        if (error) {
+          document.getElementById('info').textContent = 'Errore: ' + error.message;
+          console.error(error);
+          return;
+        }
+
+        const rows = data || [];
+        hasMore = rows.length === PAGE_SIZE;
+        totalCount = currentPage * PAGE_SIZE + rows.length + (hasMore ? 1 : 0); // stima
+
+        renderTable(rows);
+        updatePagination(rows.length);
+      } catch (err) {
+        document.getElementById('info').textContent = 'Errore di rete: ' + err.message;
+        console.error(err);
       }
-
-      totalCount = count ?? 0;
-      renderTable(data || []);
-      updatePagination();
     }
 
     function renderTable(rows) {
       const tbody = document.getElementById('rows');
       if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:2rem">Nessun risultato</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:2rem">Nessun risultato con questi filtri</td></tr>';
         return;
       }
 
@@ -210,13 +237,16 @@
       }).join('');
     }
 
-    function updatePagination() {
-      const totalPages = Math.ceil(totalCount / PAGE_SIZE) || 1;
+    function updatePagination(rowsOnPage) {
+      const from = currentPage * PAGE_SIZE + 1;
+      const to = currentPage * PAGE_SIZE + rowsOnPage;
       document.getElementById('info').textContent =
-        `${totalCount.toLocaleString('it-IT')} risultati · pagina ${currentPage + 1} di ${totalPages}`;
+        rowsOnPage === 0
+          ? 'Nessun risultato'
+          : `Mostrati ${from}–${to}${hasMore ? ' (ci sono altri risultati)' : ''}`;
       document.getElementById('pageInfo').textContent = `Pagina ${currentPage + 1}`;
       document.getElementById('prev').disabled = currentPage === 0;
-      document.getElementById('next').disabled = currentPage >= totalPages - 1;
+      document.getElementById('next').disabled = !hasMore;
     }
 
     function formatPrice(v) {
@@ -252,12 +282,11 @@
     document.getElementById('prev').onclick = () => { currentPage--; search(false); };
     document.getElementById('next').onclick = () => { currentPage++; search(false); };
 
-    // Invio nei campi di testo
     document.querySelectorAll('.filters input').forEach(inp => {
       inp.addEventListener('keydown', e => { if (e.key === 'Enter') search(true); });
     });
 
-    // Prima ricerca (mostra le carte con prezzo più alto)
+    // Prima caricamento leggero (senza filtri e senza ordinamento)
     search(true);
   </script>
 </body>
