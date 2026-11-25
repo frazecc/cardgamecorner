@@ -8,15 +8,33 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
+  <div class="topbar">
+    <button type="button" class="icon-btn" id="btnSettings" title="Impostazioni">⚙️ Impostazioni</button>
+  </div>
+
+  <div class="settings-panel" id="settingsPanel">
+    <h3>Impostazioni</h3>
+    <div class="settings-row">
+      <label><input type="checkbox" id="optDark"> Tema scuro</label>
+      <label>
+        Righe per pagina
+        <select id="optPageSize">
+          <option value="25">25</option>
+          <option value="50" selected>50</option>
+          <option value="100">100</option>
+        </select>
+      </label>
+      <label><input type="checkbox" id="optCompact"> Tabella compatta</label>
+    </div>
+  </div>
+
   <section class="filters">
     <div class="filter-row">
       <input id="name" type="text" placeholder="Nome carta..." />
       <input id="expansion" type="text" placeholder="Espansione..." />
       <input id="serial" type="text" placeholder="Numero / Serial..." />
       <input id="minCash" type="number" step="0.01" min="0" placeholder="Cash min €" value="0.01" />
-      <input id="maxCash" type="number" step="0.01" min="0" placeholder="Cash max €" />
       <input id="minBuono" type="number" step="0.01" min="0" placeholder="Buono min €" value="0.01" />
-      <input id="maxBuono" type="number" step="0.01" min="0" placeholder="Buono max €" />
       <select id="sort">
         <option value="buono_desc" selected>Buono ↓</option>
         <option value="buono_asc">Buono ↑</option>
@@ -25,7 +43,7 @@
         <option value="name_asc">Nome A-Z</option>
         <option value="">Senza ordine</option>
       </select>
-      <button id="btnReset" class="secondary">Reset</button>
+      <button type="button" class="action secondary" id="btnReset">Reset</button>
     </div>
 
     <div class="check-columns">
@@ -42,6 +60,11 @@
         <label><input type="checkbox" name="language" value="Chinese"> Chinese</label>
         <label><input type="checkbox" name="language" value="Chinese Simplified"> Chinese Simplified</label>
         <label><input type="checkbox" name="language" value="Chinese Traditional"> Chinese Traditional</label>
+        <label><input type="checkbox" name="language" value="Dutch"> Dutch</label>
+        <label><input type="checkbox" name="language" value="Indonesian"> Indonesian</label>
+        <label><input type="checkbox" name="language" value="Thai"> Thai</label>
+        <label><input type="checkbox" name="language" value="Polish"> Polish</label>
+        <label><input type="checkbox" name="language" value="Russian"> Russian</label>
       </fieldset>
 
       <fieldset class="check-group">
@@ -56,8 +79,12 @@
         <legend>Foil</legend>
         <label><input type="checkbox" name="foil" value="Reverse Holo"> Reverse Holo</label>
         <label><input type="checkbox" name="foil" value="Holo"> Holo</label>
-        <label><input type="checkbox" name="foil" value="Yes"> Yes</label>
-        <label><input type="checkbox" name="foil" value="No"> No</label>
+      </fieldset>
+
+      <fieldset class="check-group">
+        <legend>1ª edizione</legend>
+        <label><input type="checkbox" name="firstEdition" value="Yes"> Sì</label>
+        <label><input type="checkbox" name="firstEdition" value="No"> No</label>
       </fieldset>
 
       <fieldset class="check-group">
@@ -73,14 +100,14 @@
   <div class="toolbar">
     <span id="info">Caricamento...</span>
     <div class="pagination">
-      <button id="prev" disabled>← Precedente</button>
+      <button type="button" class="action secondary" id="prev" disabled>← Precedente</button>
       <span id="pageInfo">Pagina 1</span>
-      <button id="next" disabled>Successiva →</button>
+      <button type="button" class="action secondary" id="next" disabled>Successiva →</button>
     </div>
   </div>
 
   <div class="table-wrapper">
-    <table>
+    <table id="dataTable">
       <thead>
         <tr>
           <th>Img</th>
@@ -103,8 +130,8 @@
   <script>
     const SUPABASE_URL = 'https://tjdmspsbcvyvmvxvqjop.supabase.co';
     const SUPABASE_ANON_KEY = 'sb_publishable_qPV-hACz7ru0agM5aNW_XQ_d_CKbyER';
-    const PAGE_SIZE = 50;
 
+    let PAGE_SIZE = 50;
     let currentPage = 0;
     let hasMore = false;
     let lastRowsCount = 0;
@@ -127,11 +154,10 @@
         languages: checkedValues('language'),
         conditions: checkedValues('condition'),
         foils: checkedValues('foil'),
+        firstEditions: checkedValues('firstEdition'),
         statuses: checkedValues('status'),
         minCash: document.getElementById('minCash').value,
-        maxCash: document.getElementById('maxCash').value,
         minBuono: document.getElementById('minBuono').value,
-        maxBuono: document.getElementById('maxBuono').value,
         sort: document.getElementById('sort').value
       };
     }
@@ -157,13 +183,14 @@
       if (filters.foils.length === 1) q = q.eq('foil', filters.foils[0]);
       else if (filters.foils.length > 1) q = q.in('foil', filters.foils);
 
+      if (filters.firstEditions.length === 1) q = q.eq('first_edition', filters.firstEditions[0]);
+      else if (filters.firstEditions.length > 1) q = q.in('first_edition', filters.firstEditions);
+
       if (filters.statuses.length === 1) q = q.eq('status', filters.statuses[0]);
       else if (filters.statuses.length > 1) q = q.in('status', filters.statuses);
 
       if (filters.minCash) q = q.gte('buylist', filters.minCash);
-      if (filters.maxCash) q = q.lte('buylist', filters.maxCash);
       if (filters.minBuono) q = q.gte('credit', filters.minBuono);
-      if (filters.maxBuono) q = q.lte('credit', filters.maxBuono);
 
       return q;
     }
@@ -192,11 +219,8 @@
       document.getElementById('expansion').value = '';
       document.getElementById('serial').value = '';
       document.getElementById('minCash').value = '0.01';
-      document.getElementById('maxCash').value = '';
       document.getElementById('minBuono').value = '0.01';
-      document.getElementById('maxBuono').value = '';
       document.getElementById('sort').value = 'buono_desc';
-
       document.querySelectorAll('.filters input[type="checkbox"]').forEach(function(el) {
         el.checked = false;
       });
@@ -322,6 +346,48 @@
         .replace(/"/g, '&quot;');
     }
 
+    // Settings
+    function loadSettings() {
+      try {
+        var dark = localStorage.getItem('cgc_dark') === '1';
+        var ps = localStorage.getItem('cgc_pagesize') || '50';
+        var compact = localStorage.getItem('cgc_compact') === '1';
+        document.getElementById('optDark').checked = dark;
+        document.getElementById('optPageSize').value = ps;
+        document.getElementById('optCompact').checked = compact;
+        document.body.classList.toggle('dark', dark);
+        PAGE_SIZE = parseInt(ps, 10) || 50;
+        document.getElementById('dataTable').classList.toggle('compact', compact);
+      } catch (e) {}
+    }
+
+    function saveSettings() {
+      try {
+        localStorage.setItem('cgc_dark', document.getElementById('optDark').checked ? '1' : '0');
+        localStorage.setItem('cgc_pagesize', document.getElementById('optPageSize').value);
+        localStorage.setItem('cgc_compact', document.getElementById('optCompact').checked ? '1' : '0');
+      } catch (e) {}
+    }
+
+    document.getElementById('btnSettings').onclick = function() {
+      document.getElementById('settingsPanel').classList.toggle('open');
+    };
+
+    document.getElementById('optDark').onchange = function() {
+      document.body.classList.toggle('dark', this.checked);
+      saveSettings();
+    };
+    document.getElementById('optPageSize').onchange = function() {
+      PAGE_SIZE = parseInt(this.value, 10) || 50;
+      saveSettings();
+      search(true);
+    };
+    document.getElementById('optCompact').onchange = function() {
+      document.getElementById('dataTable').classList.toggle('compact', this.checked);
+      saveSettings();
+    };
+
+    // Live filters
     document.querySelectorAll('.filters input[type="text"], .filters input[type="number"]').forEach(function(el) {
       el.addEventListener('input', scheduleSearch);
     });
@@ -342,7 +408,7 @@
       if (hasMore) { currentPage++; search(false); }
     };
 
-    // Default già impostati nell'HTML; avvio ricerca
+    loadSettings();
     search(true);
   </script>
 </body>
