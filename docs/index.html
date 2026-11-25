@@ -3,35 +3,42 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CardGameCorner · Cash &amp; Buono</title>
+  <title>CardGameCorner</title>
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
-  <header>
-    <h1>CardGameCorner — Cash &amp; Buono</h1>
-    <p class="subtitle">
-      <strong>Cash</strong> = soldi che ti offrono per la carta &nbsp;·&nbsp;
-      <strong>Buono</strong> = credito da spendere nel loro negozio
-    </p>
-  </header>
-
   <section class="filters">
     <div class="filter-row">
-      <input id="name" type="text" placeholder="Nome carta (es. Charizard)..." />
+      <input id="name" type="text" placeholder="Nome carta..." />
       <input id="expansion" type="text" placeholder="Espansione..." />
       <input id="serial" type="text" placeholder="Numero / Serial..." />
+      <input id="minCash" type="number" step="0.01" placeholder="Cash min €" />
+      <input id="maxCash" type="number" step="0.01" placeholder="Cash max €" />
+      <select id="sort">
+        <option value="cash_desc">Cash ↓</option>
+        <option value="cash_asc">Cash ↑</option>
+        <option value="buono_desc">Buono ↓</option>
+        <option value="name_asc">Nome A-Z</option>
+        <option value="">Senza ordine</option>
+      </select>
+      <button id="btnReset" class="secondary">Reset</button>
     </div>
 
-    <div class="filter-row check-groups">
+    <div class="check-columns">
       <fieldset class="check-group">
         <legend>Lingua</legend>
         <label><input type="checkbox" name="language" value="Italiano"> Italiano</label>
         <label><input type="checkbox" name="language" value="English"> English</label>
+        <label><input type="checkbox" name="language" value="Japanese"> Japanese</label>
         <label><input type="checkbox" name="language" value="German"> German</label>
         <label><input type="checkbox" name="language" value="French"> French</label>
         <label><input type="checkbox" name="language" value="Spanish"> Spanish</label>
-        <label><input type="checkbox" name="language" value="Japanese"> Japanese</label>
+        <label><input type="checkbox" name="language" value="Portuguese"> Portuguese</label>
+        <label><input type="checkbox" name="language" value="Korean"> Korean</label>
+        <label><input type="checkbox" name="language" value="Chinese"> Chinese</label>
+        <label><input type="checkbox" name="language" value="Chinese Simplified"> Chinese Simplified</label>
+        <label><input type="checkbox" name="language" value="Chinese Traditional"> Chinese Traditional</label>
       </fieldset>
 
       <fieldset class="check-group">
@@ -45,6 +52,9 @@
       <fieldset class="check-group">
         <legend>Foil</legend>
         <label><input type="checkbox" name="foil" value="Reverse Holo"> Reverse Holo</label>
+        <label><input type="checkbox" name="foil" value="Holo"> Holo</label>
+        <label><input type="checkbox" name="foil" value="Yes"> Yes</label>
+        <label><input type="checkbox" name="foil" value="No"> No</label>
       </fieldset>
 
       <fieldset class="check-group">
@@ -54,19 +64,6 @@
         <label><input type="checkbox" name="status" value="SENZA PREZZO BUYLIST"> Senza prezzo</label>
         <label><input type="checkbox" name="status" value="ESCLUSA DALLA BUYLIST"> Esclusa</label>
       </fieldset>
-    </div>
-
-    <div class="filter-row">
-      <input id="minCash" type="number" step="0.01" placeholder="Cash min €" />
-      <input id="maxCash" type="number" step="0.01" placeholder="Cash max €" />
-      <select id="sort">
-        <option value="cash_desc">Cash ↓ (pagina)</option>
-        <option value="cash_asc">Cash ↑ (pagina)</option>
-        <option value="buono_desc">Buono ↓ (pagina)</option>
-        <option value="name_asc">Nome A-Z (pagina)</option>
-        <option value="">Come arriva dal DB</option>
-      </select>
-      <button id="btnReset" class="secondary">Reset filtri</button>
     </div>
   </section>
 
@@ -100,17 +97,6 @@
     </table>
   </div>
 
-  <footer>
-    <p>
-      Vista pubblica <code>cgc_buylist</code> · solo lettura<br>
-      <small>
-        <strong>Cash</strong> = denaro offerto &nbsp;·&nbsp;
-        <strong>Buono</strong> = credito negozio &nbsp;·&nbsp;
-        L’ordinamento vale sulla pagina corrente (il DB non regge ancora un ordinamento globale veloce).
-      </small>
-    </p>
-  </footer>
-
   <script>
     const SUPABASE_URL = 'https://tjdmspsbcvyvmvxvqjop.supabase.co';
     const SUPABASE_ANON_KEY = 'sb_publishable_qPV-hACz7ru0agM5aNW_XQ_d_CKbyER';
@@ -119,7 +105,7 @@
     let currentPage = 0;
     let hasMore = false;
     let lastRowsCount = 0;
-    let knownTotal = null; // valorizzato quando siamo sull'ultima pagina
+    let knownTotal = null;
     let debounceTimer = null;
     let searchId = 0;
 
@@ -220,11 +206,7 @@
         var rows = result.data || [];
         lastRowsCount = rows.length;
         hasMore = rows.length === PAGE_SIZE;
-
-        if (!hasMore) {
-          // ultima pagina → totale esatto
-          knownTotal = currentPage * PAGE_SIZE + rows.length;
-        }
+        if (!hasMore) knownTotal = currentPage * PAGE_SIZE + rows.length;
 
         rows = sortClient(rows, filters.sort);
         renderTable(rows);
@@ -244,10 +226,9 @@
     function renderTable(rows) {
       var tbody = document.getElementById('rows');
       if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:2rem">Nessun risultato con questi filtri</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:2rem">Nessun risultato</td></tr>';
         return;
       }
-
       tbody.innerHTML = rows.map(function(r) {
         var img = r.image
           ? '<img src="' + r.image + '" alt="" loading="lazy" class="thumb" onerror="this.style.display=\'none\'">'
@@ -274,9 +255,7 @@
       var pageNum = currentPage + 1;
       var from = currentPage * PAGE_SIZE + (lastRowsCount ? 1 : 0);
       var to = currentPage * PAGE_SIZE + lastRowsCount;
-
-      var infoText;
-      var pageText;
+      var infoText, pageText;
 
       if (lastRowsCount === 0) {
         infoText = 'Nessun risultato';
@@ -285,12 +264,9 @@
         var totalPages = Math.max(1, Math.ceil(knownTotal / PAGE_SIZE));
         infoText = 'Risultati ' + from + '–' + to + ' di ' + knownTotal.toLocaleString('it-IT');
         pageText = 'Pagina ' + pageNum + ' di ' + totalPages;
-      } else if (hasMore) {
-        infoText = 'Risultati ' + from + '–' + to + ' · almeno ' + to + ' trovati';
-        pageText = 'Pagina ' + pageNum + ' · altre pagine disponibili';
       } else {
-        infoText = 'Risultati ' + from + '–' + to;
-        pageText = 'Pagina ' + pageNum;
+        infoText = 'Risultati ' + from + '–' + to + ' · almeno ' + to;
+        pageText = 'Pagina ' + pageNum + ' · altre pagine disponibili';
       }
 
       document.getElementById('info').textContent = infoText;
@@ -320,7 +296,6 @@
         .replace(/"/g, '&quot;');
     }
 
-    // Live update
     document.querySelectorAll('.filters input[type="text"], .filters input[type="number"]').forEach(function(el) {
       el.addEventListener('input', scheduleSearch);
     });
@@ -341,16 +316,10 @@
     };
 
     document.getElementById('prev').onclick = function() {
-      if (currentPage > 0) {
-        currentPage--;
-        search(false);
-      }
+      if (currentPage > 0) { currentPage--; search(false); }
     };
     document.getElementById('next').onclick = function() {
-      if (hasMore) {
-        currentPage++;
-        search(false);
-      }
+      if (hasMore) { currentPage++; search(false); }
     };
 
     search(true);
