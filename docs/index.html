@@ -13,12 +13,15 @@
       <input id="name" type="text" placeholder="Nome carta..." />
       <input id="expansion" type="text" placeholder="Espansione..." />
       <input id="serial" type="text" placeholder="Numero / Serial..." />
-      <input id="minCash" type="number" step="0.01" placeholder="Cash min €" />
-      <input id="maxCash" type="number" step="0.01" placeholder="Cash max €" />
+      <input id="minCash" type="number" step="0.01" min="0" placeholder="Cash min €" value="0.01" />
+      <input id="maxCash" type="number" step="0.01" min="0" placeholder="Cash max €" />
+      <input id="minBuono" type="number" step="0.01" min="0" placeholder="Buono min €" value="0.01" />
+      <input id="maxBuono" type="number" step="0.01" min="0" placeholder="Buono max €" />
       <select id="sort">
+        <option value="buono_desc" selected>Buono ↓</option>
+        <option value="buono_asc">Buono ↑</option>
         <option value="cash_desc">Cash ↓</option>
         <option value="cash_asc">Cash ↑</option>
-        <option value="buono_desc">Buono ↓</option>
         <option value="name_asc">Nome A-Z</option>
         <option value="">Senza ordine</option>
       </select>
@@ -59,7 +62,7 @@
 
       <fieldset class="check-group">
         <legend>Stato offerta</legend>
-        <label><input type="checkbox" name="status" value="PREZZO DISPONIBILE"> Prezzo disponibile</label>
+        <label><input type="checkbox" name="status" value="PREZZO DISPONIBILE" checked> Prezzo disponibile</label>
         <label><input type="checkbox" name="status" value="VALUTAZIONE SU RICHIESTA"> Valutazione su richiesta</label>
         <label><input type="checkbox" name="status" value="SENZA PREZZO BUYLIST"> Senza prezzo</label>
         <label><input type="checkbox" name="status" value="ESCLUSA DALLA BUYLIST"> Esclusa</label>
@@ -127,6 +130,8 @@
         statuses: checkedValues('status'),
         minCash: document.getElementById('minCash').value,
         maxCash: document.getElementById('maxCash').value,
+        minBuono: document.getElementById('minBuono').value,
+        maxBuono: document.getElementById('maxBuono').value,
         sort: document.getElementById('sort').value
       };
     }
@@ -157,6 +162,8 @@
 
       if (filters.minCash) q = q.gte('buylist', filters.minCash);
       if (filters.maxCash) q = q.lte('buylist', filters.maxCash);
+      if (filters.minBuono) q = q.gte('credit', filters.minBuono);
+      if (filters.maxBuono) q = q.lte('credit', filters.maxBuono);
 
       return q;
     }
@@ -170,12 +177,31 @@
         copy.sort(function(a, b) { return (Number(a.buylist) || 0) - (Number(b.buylist) || 0); });
       } else if (sort === 'buono_desc') {
         copy.sort(function(a, b) { return (Number(b.credit) || 0) - (Number(a.credit) || 0); });
+      } else if (sort === 'buono_asc') {
+        copy.sort(function(a, b) { return (Number(a.credit) || 0) - (Number(b.credit) || 0); });
       } else if (sort === 'name_asc') {
         copy.sort(function(a, b) {
           return String(a.name || '').localeCompare(String(b.name || ''), 'it', { sensitivity: 'base' });
         });
       }
       return copy;
+    }
+
+    function applyDefaults() {
+      document.getElementById('name').value = '';
+      document.getElementById('expansion').value = '';
+      document.getElementById('serial').value = '';
+      document.getElementById('minCash').value = '0.01';
+      document.getElementById('maxCash').value = '';
+      document.getElementById('minBuono').value = '0.01';
+      document.getElementById('maxBuono').value = '';
+      document.getElementById('sort').value = 'buono_desc';
+
+      document.querySelectorAll('.filters input[type="checkbox"]').forEach(function(el) {
+        el.checked = false;
+      });
+      var prezzo = document.querySelector('input[name="status"][value="PREZZO DISPONIBILE"]');
+      if (prezzo) prezzo.checked = true;
     }
 
     async function search(resetPage) {
@@ -196,7 +222,7 @@
         if (result.error) {
           var msg = result.error.message || 'Errore sconosciuto';
           if (msg.indexOf('timeout') !== -1 || msg.indexOf('canceling') !== -1) {
-            msg = 'Timeout: restringi la ricerca (nome o Cash minimo).';
+            msg = 'Timeout: restringi la ricerca (nome o valori minimi).';
           }
           document.getElementById('info').textContent = 'Errore: ' + msg;
           console.error(result.error);
@@ -305,13 +331,7 @@
     document.getElementById('sort').addEventListener('change', function() { search(true); });
 
     document.getElementById('btnReset').onclick = function() {
-      document.querySelectorAll('.filters input[type="text"], .filters input[type="number"]').forEach(function(el) {
-        el.value = '';
-      });
-      document.querySelectorAll('.filters input[type="checkbox"]').forEach(function(el) {
-        el.checked = false;
-      });
-      document.getElementById('sort').selectedIndex = 0;
+      applyDefaults();
       search(true);
     };
 
@@ -322,6 +342,7 @@
       if (hasMore) { currentPage++; search(false); }
     };
 
+    // Default già impostati nell'HTML; avvio ricerca
     search(true);
   </script>
 </body>
