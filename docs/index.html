@@ -10,7 +10,7 @@
 <body>
   <header>
     <h1>CardGameCorner Buylist</h1>
-    <p class="subtitle">Dati pubblici da Supabase · aggiornati automaticamente</p>
+    <p class="subtitle">Dati pubblici da Supabase · aggiornamento automatico mentre digiti</p>
   </header>
 
   <section class="filters">
@@ -57,18 +57,17 @@
       <input id="minBuylist" type="number" step="0.01" placeholder="Buylist min €" />
       <input id="maxBuylist" type="number" step="0.01" placeholder="Buylist max €" />
       <select id="sort">
-        <option value="buylist_desc">Prezzo più alto (pagina)</option>
-        <option value="buylist_asc">Prezzo più basso (pagina)</option>
-        <option value="name_asc">Nome A-Z (pagina)</option>
-        <option value="">Nessun ordinamento</option>
+        <option value="buylist_desc">Prezzo ↓ (pagina corrente)</option>
+        <option value="buylist_asc">Prezzo ↑ (pagina corrente)</option>
+        <option value="name_asc">Nome A-Z (pagina corrente)</option>
+        <option value="">Come arriva dal DB</option>
       </select>
-      <button id="btnSearch">Cerca</button>
-      <button id="btnReset" class="secondary">Reset</button>
+      <button id="btnReset" class="secondary">Reset filtri</button>
     </div>
   </section>
 
   <div class="toolbar">
-    <span id="info">Pronto — usa i filtri (consigliato partire da nome o prezzo minimo)</span>
+    <span id="info">Caricamento...</span>
     <div class="pagination">
       <button id="prev" disabled>← Precedente</button>
       <span id="pageInfo">Pagina 1</span>
@@ -98,18 +97,22 @@
   </div>
 
   <footer>
-    <p>Dati provenienti dalla vista pubblica <code>cgc_buylist</code> · solo lettura</p>
+    <p>
+      Vista pubblica <code>cgc_buylist</code> · solo lettura<br>
+      <small>L’ordinamento per prezzo vale solo sulla pagina attuale (il database non supporta ancora un ordinamento globale veloce).</small>
+    </p>
   </footer>
 
   <script>
-    // ========== CREDENZIALI (già inserite) ==========
     const SUPABASE_URL = 'https://tjdmspsbcvyvmvxvqjop.supabase.co';
     const SUPABASE_ANON_KEY = 'sb_publishable_qPV-hACz7ru0agM5aNW_XQ_d_CKbyER';
-    // ===============================================
 
     const PAGE_SIZE = 50;
     let currentPage = 0;
     let hasMore = false;
+    let lastRowsCount = 0;
+    let debounceTimer = null;
+    let searchId = 0; // evita risposte vecchie fuori ordine
 
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -129,8 +132,8 @@
     }
 
     function buildQuery(filters) {
-      // MAI ordinare per buylist sul server → causa timeout
-      let q = sb
+      // Nessun order sul server: causa timeout
+      var q = sb
         .from('cgc_buylist')
         .select(
           'name, name_en, expansion, serial_number, image, language, condition, foil, first_edition, buylist, credit, status'
@@ -152,13 +155,19 @@
 
     function sortClient(rows, sort) {
       if (!sort || !rows.length) return rows;
-      const copy = rows.slice();
+      var copy = rows.slice();
       if (sort === 'buylist_desc') {
-        copy.sort(function(a, b) { return (Number(b.buylist) || 0) - (Number(a.buylist) || 0); });
+        copy.sort(function(a, b) {
+          return (Number(b.buylist) || 0) - (Number(a.buylist) || 0);
+        });
       } else if (sort === 'buylist_asc') {
-        copy.sort(function(a, b) { return (Number(a.buylist) || 0) - (Number(b.buylist) || 0); });
+        copy.sort(function(a, b) {
+          return (Number(a.buylist) || 0) - (Number(b.buylist) || 0);
+        });
       } else if (sort === 'name_asc') {
-        copy.sort(function(a, b) { return String(a.name || '').localeCompare(String(b.name || '')); });
+        copy.sort(function(a, b) {
+          return String(a.name || '').localeCompare(String(b.name || ''), 'it', { sensitivity: 'base' });
+        });
       }
       return copy;
     }
@@ -167,34 +176,43 @@
       if (resetPage === undefined) resetPage = true;
       if (resetPage) currentPage = 0;
 
-      const filters = getFilters();
+      var myId = ++searchId;
+      var filters = getFilters();
       document.getElementById('info').textContent = 'Caricamento...';
 
       try {
-        const { data, error } = await buildQuery(filters);
+        var result = await buildQuery(filters);
+        if (myId !== searchId) return; // risposta vecchia, ignora
 
-        if (error) {
-          var msg = error.message || 'Errore sconosciuto';
+        if (result.error) {
+          var msg = result.error.message || 'Errore sconosciuto';
           if (msg.indexOf('timeout') !== -1 || msg.indexOf('canceling') !== -1) {
-            msg = 'Timeout: la ricerca è troppo ampia. Aggiungi un filtro più selettivo (nome o prezzo minimo).';
+            msg = 'Timeout: restringi la ricerca (nome o prezzo minimo).';
           }
           document.getElementById('info').textContent = 'Errore: ' + msg;
-          console.error(error);
+          console.error(result.error);
           return;
         }
 
-        var rows = data || [];
+        var rows = result.data || [];
+        lastRowsCount = rows.length;
         hasMore = rows.length === PAGE_SIZE;
 
-        // Ordinamento solo sulla pagina corrente (client-side)
         rows = sortClient(rows, filters.sort);
-
         renderTable(rows);
-        updatePagination(rows.length);
+        updatePagination();
       } catch (err) {
+        if (myId !== searchId) return;
         document.getElementById('info').textContent = 'Errore di rete: ' + err.message;
         console.error(err);
       }
+    }
+
+    function scheduleSearch() {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(function() {
+        search(true);
+      }, 350);
     }
 
     function renderTable(rows) {
@@ -226,14 +244,27 @@
       }).join('');
     }
 
-    function updatePagination(rowsOnPage) {
-      var from = currentPage * PAGE_SIZE + 1;
-      var to = currentPage * PAGE_SIZE + rowsOnPage;
-      document.getElementById('info').textContent =
-        rowsOnPage === 0
-          ? 'Nessun risultato'
-          : 'Mostrati ' + from + '–' + to + (hasMore ? ' (ci sono altri risultati)' : '');
-      document.getElementById('pageInfo').textContent = 'Pagina ' + (currentPage + 1);
+    function updatePagination() {
+      var from = currentPage * PAGE_SIZE + (lastRowsCount ? 1 : 0);
+      var to = currentPage * PAGE_SIZE + lastRowsCount;
+      var pageNum = currentPage + 1;
+
+      var infoText;
+      if (lastRowsCount === 0) {
+        infoText = 'Nessun risultato';
+      } else if (hasMore) {
+        // non conosciamo il totale esatto (conteggio troppo lento sul DB)
+        infoText = 'Risultati ' + from + '–' + to + ' · almeno ' + to + ' trovati · pagina ' + pageNum + ' (ce ne sono altre)';
+      } else {
+        // ultima pagina: totale esatto
+        var total = to;
+        var totalPages = pageNum;
+        infoText = 'Risultati ' + from + '–' + to + ' · totale ' + total.toLocaleString('it-IT') +
+          ' · ' + totalPages + (totalPages === 1 ? ' pagina' : ' pagine');
+      }
+
+      document.getElementById('info').textContent = infoText;
+      document.getElementById('pageInfo').textContent = 'Pagina ' + pageNum;
       document.getElementById('prev').disabled = currentPage === 0;
       document.getElementById('next').disabled = !hasMore;
     }
@@ -259,7 +290,18 @@
         .replace(/"/g, '&quot;');
     }
 
-    document.getElementById('btnSearch').onclick = function() { search(true); };
+    // Aggiornamento in tempo reale
+    document.querySelectorAll('.filters input').forEach(function(el) {
+      el.addEventListener('input', scheduleSearch);
+    });
+    document.querySelectorAll('.filters select').forEach(function(el) {
+      el.addEventListener('change', function() {
+        // per sort: se è solo cambio ordinamento e abbiamo già dati, potremmo riordinare
+        // ma è più semplice rifare la search (veloce senza order server)
+        search(true);
+      });
+    });
+
     document.getElementById('btnReset').onclick = function() {
       document.querySelectorAll('.filters input, .filters select').forEach(function(el) {
         if (el.tagName === 'SELECT') el.selectedIndex = 0;
@@ -267,12 +309,19 @@
       });
       search(true);
     };
-    document.getElementById('prev').onclick = function() { currentPage--; search(false); };
-    document.getElementById('next').onclick = function() { currentPage++; search(false); };
 
-    document.querySelectorAll('.filters input').forEach(function(inp) {
-      inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') search(true); });
-    });
+    document.getElementById('prev').onclick = function() {
+      if (currentPage > 0) {
+        currentPage--;
+        search(false);
+      }
+    };
+    document.getElementById('next').onclick = function() {
+      if (hasMore) {
+        currentPage++;
+        search(false);
+      }
+    };
 
     search(true);
   </script>
