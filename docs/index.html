@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CardGameCorner Buylist</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <header>
+    <h1>CardGameCorner Buylist</h1>
+    <p class="subtitle">Dati pubblici da Supabase · aggiornati automaticamente</p>
+  </header>
+
+  <section class="filters">
+    <div class="filter-row">
+      <input id="name" type="text" placeholder="Nome carta..." />
+      <input id="expansion" type="text" placeholder="Espansione..." />
+      <input id="serial" type="text" placeholder="Numero / Serial..." />
+    </div>
+
+    <div class="filter-row">
+      <select id="language">
+        <option value="">Tutte le lingue</option>
+        <option value="Italian">Italian</option>
+        <option value="English">English</option>
+        <option value="Japanese">Japanese</option>
+        <option value="German">German</option>
+        <option value="French">French</option>
+        <option value="Spanish">Spanish</option>
+        <option value="Portuguese">Portuguese</option>
+        <option value="Korean">Korean</option>
+        <option value="Chinese">Chinese</option>
+      </select>
+
+      <select id="condition">
+        <option value="">Tutte le condizioni</option>
+        <option value="Near Mint">Near Mint</option>
+        <option value="Lightly Played">Lightly Played</option>
+        <option value="Moderately Played">Moderately Played</option>
+        <option value="Heavily Played">Heavily Played</option>
+        <option value="Damaged">Damaged</option>
+        <option value="Excellent">Excellent</option>
+        <option value="Good">Good</option>
+        <option value="Poor">Poor</option>
+      </select>
+
+      <select id="foil">
+        <option value="">Foil / non foil</option>
+        <option value="Yes">Foil / Holo</option>
+        <option value="No">Non foil</option>
+        <option value="Reverse Holo">Reverse Holo</option>
+      </select>
+
+      <select id="firstEdition">
+        <option value="">1ª edizione</option>
+        <option value="Yes">Sì</option>
+        <option value="No">No</option>
+      </select>
+    </div>
+
+    <div class="filter-row">
+      <input id="minBuylist" type="number" step="0.01" placeholder="Buylist min €" />
+      <input id="maxBuylist" type="number" step="0.01" placeholder="Buylist max €" />
+      <select id="status">
+        <option value="">Tutti gli stati</option>
+        <option value="PREZZO DISPONIBILE">Prezzo disponibile</option>
+        <option value="VALUTAZIONE SU RICHIESTA">Valutazione su richiesta</option>
+        <option value="ESCLUSA DALLA BUYLIST">Esclusa</option>
+        <option value="SENZA PREZZO BUYLIST">Senza prezzo</option>
+      </select>
+      <button id="btnSearch">Cerca</button>
+      <button id="btnReset" class="secondary">Reset</button>
+    </div>
+  </section>
+
+  <div class="toolbar">
+    <span id="info">Pronto</span>
+    <div 
