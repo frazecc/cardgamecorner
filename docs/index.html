@@ -57,10 +57,10 @@
       <input id="minBuylist" type="number" step="0.01" placeholder="Buylist min €" />
       <input id="maxBuylist" type="number" step="0.01" placeholder="Buylist max €" />
       <select id="sort">
-        <option value="">Ordine predefinito</option>
-        <option value="buylist_desc">Prezzo più alto</option>
-        <option value="buylist_asc">Prezzo più basso</option>
-        <option value="name_asc">Nome A-Z</option>
+        <option value="buylist_desc">Prezzo più alto (pagina)</option>
+        <option value="buylist_asc">Prezzo più basso (pagina)</option>
+        <option value="name_asc">Nome A-Z (pagina)</option>
+        <option value="">Nessun ordinamento</option>
       </select>
       <button id="btnSearch">Cerca</button>
       <button id="btnReset" class="secondary">Reset</button>
@@ -128,12 +128,8 @@
       };
     }
 
-    function hasAnyFilter(f) {
-      return !!(f.name || f.expansion || f.serial || f.language || f.condition ||
-                f.foil || f.minBuylist || f.maxBuylist || f.status);
-    }
-
     function buildQuery(filters) {
+      // MAI ordinare per buylist sul server → causa timeout
       let q = sb
         .from('cgc_buylist')
         .select(
@@ -151,17 +147,24 @@
       if (filters.maxBuylist) q = q.lte('buylist', filters.maxBuylist);
       if (filters.status) q = q.eq('status', filters.status);
 
-      // Ordinamento solo se c'è almeno un filtro (evita timeout)
-      if (hasAnyFilter(filters) && filters.sort) {
-        if (filters.sort === 'buylist_desc') q = q.order('buylist', { ascending: false });
-        else if (filters.sort === 'buylist_asc') q = q.order('buylist', { ascending: true });
-        else if (filters.sort === 'name_asc') q = q.order('name', { ascending: true });
-      }
-
       return q;
     }
 
-    async function search(resetPage = true) {
+    function sortClient(rows, sort) {
+      if (!sort || !rows.length) return rows;
+      const copy = rows.slice();
+      if (sort === 'buylist_desc') {
+        copy.sort(function(a, b) { return (Number(b.buylist) || 0) - (Number(a.buylist) || 0); });
+      } else if (sort === 'buylist_asc') {
+        copy.sort(function(a, b) { return (Number(a.buylist) || 0) - (Number(b.buylist) || 0); });
+      } else if (sort === 'name_asc') {
+        copy.sort(function(a, b) { return String(a.name || '').localeCompare(String(b.name || '')); });
+      }
+      return copy;
+    }
+
+    async function search(resetPage) {
+      if (resetPage === undefined) resetPage = true;
       if (resetPage) currentPage = 0;
 
       const filters = getFilters();
@@ -171,17 +174,20 @@
         const { data, error } = await buildQuery(filters);
 
         if (error) {
-          let msg = error.message || 'Errore sconosciuto';
-          if (msg.includes('timeout') || msg.includes('canceling')) {
-            msg = 'Timeout: la ricerca è troppo ampia. Aggiungi un filtro più selettivo (nome, prezzo minimo, lingua...).';
+          var msg = error.message || 'Errore sconosciuto';
+          if (msg.indexOf('timeout') !== -1 || msg.indexOf('canceling') !== -1) {
+            msg = 'Timeout: la ricerca è troppo ampia. Aggiungi un filtro più selettivo (nome o prezzo minimo).';
           }
           document.getElementById('info').textContent = 'Errore: ' + msg;
           console.error(error);
           return;
         }
 
-        const rows = data || [];
+        var rows = data || [];
         hasMore = rows.length === PAGE_SIZE;
+
+        // Ordinamento solo sulla pagina corrente (client-side)
+        rows = sortClient(rows, filters.sort);
 
         renderTable(rows);
         updatePagination(rows.length);
@@ -192,14 +198,14 @@
     }
 
     function renderTable(rows) {
-      const tbody = document.getElementById('rows');
+      var tbody = document.getElementById('rows');
       if (!rows.length) {
         tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:2rem">Nessun risultato con questi filtri</td></tr>';
         return;
       }
 
-      tbody.innerHTML = rows.map(r => {
-        const img = r.image
+      tbody.innerHTML = rows.map(function(r) {
+        var img = r.image
           ? '<img src="' + r.image + '" alt="" loading="lazy" class="thumb" onerror="this.style.display=\'none\'">'
           : '';
         return '<tr>' +
@@ -221,8 +227,8 @@
     }
 
     function updatePagination(rowsOnPage) {
-      const from = currentPage * PAGE_SIZE + 1;
-      const to = currentPage * PAGE_SIZE + rowsOnPage;
+      var from = currentPage * PAGE_SIZE + 1;
+      var to = currentPage * PAGE_SIZE + rowsOnPage;
       document.getElementById('info').textContent =
         rowsOnPage === 0
           ? 'Nessun risultato'
@@ -239,9 +245,9 @@
 
     function statusClass(s) {
       if (!s) return '';
-      if (s.includes('DISPONIBILE')) return 'ok';
-      if (s.includes('VALUTAZIONE')) return 'warn';
-      if (s.includes('ESCLUSA')) return 'bad';
+      if (s.indexOf('DISPONIBILE') !== -1) return 'ok';
+      if (s.indexOf('VALUTAZIONE') !== -1) return 'warn';
+      if (s.indexOf('ESCLUSA') !== -1) return 'bad';
       return '';
     }
 
@@ -253,7 +259,6 @@
         .replace(/"/g, '&quot;');
     }
 
-    // Eventi
     document.getElementById('btnSearch').onclick = function() { search(true); };
     document.getElementById('btnReset').onclick = function() {
       document.querySelectorAll('.filters input, .filters select').forEach(function(el) {
@@ -269,7 +274,6 @@
       inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') search(true); });
     });
 
-    // Prima caricamento leggero
     search(true);
   </script>
 </body>
