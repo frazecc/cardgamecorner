@@ -77,4 +77,188 @@
 
   <div class="toolbar">
     <span id="info">Pronto</span>
-    <div 
+    <div class="pagination">
+      <button id="prev" disabled>← Precedente</button>
+      <span id="pageInfo">Pagina 1</span>
+      <button id="next" disabled>Successiva →</button>
+    </div>
+  </div>
+
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Img</th>
+          <th>Nome</th>
+          <th>Espansione</th>
+          <th>N°</th>
+          <th>Lingua</th>
+          <th>Condizione</th>
+          <th>Foil</th>
+          <th>1ª</th>
+          <th class="num">Buylist</th>
+          <th class="num">Credit</th>
+          <th>Stato</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <footer>
+    <p>Dati provenienti dalla vista pubblica <code>cgc_buylist</code> · solo lettura</p>
+  </footer>
+
+  <script>
+    // ========== CREDENZIALI (già inserite) ==========
+    const SUPABASE_URL = 'https://tjdmspsbcvyvmvxvqjop.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_qPV-hACz7ru0agM5aNW_XQ_d_CKbyER';
+    // ===============================================
+
+    const PAGE_SIZE = 50;
+    let currentPage = 0;
+    let totalCount = 0;
+
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    function getFilters() {
+      return {
+        name: document.getElementById('name').value.trim(),
+        expansion: document.getElementById('expansion').value.trim(),
+        serial: document.getElementById('serial').value.trim(),
+        language: document.getElementById('language').value,
+        condition: document.getElementById('condition').value,
+        foil: document.getElementById('foil').value,
+        firstEdition: document.getElementById('firstEdition').value,
+        minBuylist: document.getElementById('minBuylist').value,
+        maxBuylist: document.getElementById('maxBuylist').value,
+        status: document.getElementById('status').value
+      };
+    }
+
+    function buildQuery(filters) {
+      let q = supabase
+        .from('cgc_buylist')
+        .select(
+          'name, name_en, expansion, serial_number, image, language, condition, foil, first_edition, buylist, credit, status',
+          { count: 'exact' }
+        )
+        .order('buylist', { ascending: false })
+        .range(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE - 1);
+
+      if (filters.name) q = q.ilike('name', `%${filters.name}%`);
+      if (filters.expansion) q = q.ilike('expansion', `%${filters.expansion}%`);
+      if (filters.serial) q = q.ilike('serial_number', `%${filters.serial}%`);
+      if (filters.language) q = q.eq('language', filters.language);
+      if (filters.condition) q = q.eq('condition', filters.condition);
+      if (filters.foil) q = q.eq('foil', filters.foil);
+      if (filters.firstEdition) q = q.eq('first_edition', filters.firstEdition);
+      if (filters.minBuylist) q = q.gte('buylist', filters.minBuylist);
+      if (filters.maxBuylist) q = q.lte('buylist', filters.maxBuylist);
+      if (filters.status) q = q.eq('status', filters.status);
+
+      return q;
+    }
+
+    async function search(resetPage = true) {
+      if (resetPage) currentPage = 0;
+
+      const filters = getFilters();
+      document.getElementById('info').textContent = 'Caricamento...';
+
+      const { data, error, count } = await buildQuery(filters);
+
+      if (error) {
+        document.getElementById('info').textContent = 'Errore: ' + error.message;
+        console.error(error);
+        return;
+      }
+
+      totalCount = count ?? 0;
+      renderTable(data || []);
+      updatePagination();
+    }
+
+    function renderTable(rows) {
+      const tbody = document.getElementById('rows');
+      if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:2rem">Nessun risultato</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = rows.map(r => {
+        const img = r.image
+          ? `<img src="${r.image}" alt="" loading="lazy" class="thumb" onerror="this.style.display='none'">`
+          : '';
+        return `
+          <tr>
+            <td class="img-cell">${img}</td>
+            <td>
+              <strong>${escapeHtml(r.name || '')}</strong>
+              ${r.name_en && r.name_en !== r.name ? `<br><small>${escapeHtml(r.name_en)}</small>` : ''}
+            </td>
+            <td>${escapeHtml(r.expansion || '')}</td>
+            <td>${escapeHtml(r.serial_number || '')}</td>
+            <td>${escapeHtml(r.language || '')}</td>
+            <td>${escapeHtml(r.condition || '')}</td>
+            <td>${escapeHtml(r.foil || '')}</td>
+            <td>${escapeHtml(r.first_edition || '')}</td>
+            <td class="num">${formatPrice(r.buylist)}</td>
+            <td class="num">${formatPrice(r.credit)}</td>
+            <td><span class="status ${statusClass(r.status)}">${escapeHtml(r.status || '')}</span></td>
+          </tr>`;
+      }).join('');
+    }
+
+    function updatePagination() {
+      const totalPages = Math.ceil(totalCount / PAGE_SIZE) || 1;
+      document.getElementById('info').textContent =
+        `${totalCount.toLocaleString('it-IT')} risultati · pagina ${currentPage + 1} di ${totalPages}`;
+      document.getElementById('pageInfo').textContent = `Pagina ${currentPage + 1}`;
+      document.getElementById('prev').disabled = currentPage === 0;
+      document.getElementById('next').disabled = currentPage >= totalPages - 1;
+    }
+
+    function formatPrice(v) {
+      if (v == null || v === '') return '—';
+      return Number(v).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function statusClass(s) {
+      if (!s) return '';
+      if (s.includes('DISPONIBILE')) return 'ok';
+      if (s.includes('VALUTAZIONE')) return 'warn';
+      if (s.includes('ESCLUSA')) return 'bad';
+      return '';
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    // Eventi
+    document.getElementById('btnSearch').onclick = () => search(true);
+    document.getElementById('btnReset').onclick = () => {
+      document.querySelectorAll('.filters input, .filters select').forEach(el => {
+        if (el.tagName === 'SELECT') el.selectedIndex = 0;
+        else el.value = '';
+      });
+      search(true);
+    };
+    document.getElementById('prev').onclick = () => { currentPage--; search(false); };
+    document.getElementById('next').onclick = () => { currentPage++; search(false); };
+
+    // Invio nei campi di testo
+    document.querySelectorAll('.filters input').forEach(inp => {
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') search(true); });
+    });
+
+    // Prima ricerca (mostra le carte con prezzo più alto)
+    search(true);
+  </script>
+</body>
+</html>
