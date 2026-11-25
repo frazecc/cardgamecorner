@@ -119,7 +119,7 @@
     let currentPage = 0;
     let totalCount = 0;
 
-    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     function getFilters() {
       return {
@@ -137,7 +137,7 @@
     }
 
     function buildQuery(filters) {
-      let q = supabase
+      let q = sb
         .from('cgc_buylist')
         .select(
           'name, name_en, expansion, serial_number, image, language, condition, foil, first_edition, buylist, credit, status',
