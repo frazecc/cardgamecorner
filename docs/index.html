@@ -4,8 +4,16 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>CardGameCorner</title>
-  <link rel="stylesheet" href="style.css" />
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link rel="stylesheet" href="../style.css" />
+  <style>
+    .meta-line { font-size: 0.78rem; color: var(--muted); margin: 0 0 0.5rem; }
+    .meta-line.stale { color: var(--warn-fg); background: var(--warn-bg); border-radius: 6px; padding: 0.25rem 0.5rem; }
+    .toolbar-right { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+    .export-group { display: flex; gap: 0.35rem; }
+    .notice { padding: 0.5rem 0.7rem; margin-bottom: 0.5rem; border-radius: 6px; font-size: 0.85rem;
+              background: var(--warn-bg); color: var(--warn-fg); display: none; }
+    .notice.show { display: block; }
+  </style>
 </head>
 <body>
   <div class="topbar">
@@ -26,6 +34,9 @@
       </label>
     </div>
   </div>
+
+  <p class="meta-line" id="metaLine">Caricamento dati...</p>
+  <div class="notice" id="notice" role="status"></div>
 
   <section class="filters">
     <div class="field-row">
@@ -66,41 +77,19 @@
       <fieldset class="check-group">
         <legend>Lingua</legend>
         <div class="lang-split">
-          <div>
-            <label><input type="checkbox" name="language" value="Italiano"> Italiano</label>
-            <label><input type="checkbox" name="language" value="English"> English</label>
-            <label><input type="checkbox" name="language" value="Japanese"> Japanese</label>
-            <label><input type="checkbox" name="language" value="Chinese"> Chinese</label>
-            <label><input type="checkbox" name="language" value="Chinese Simplified"> Chinese Simplified</label>
-            <label><input type="checkbox" name="language" value="Chinese Traditional"> Chinese Traditional</label>
-            <label><input type="checkbox" name="language" value="Korean"> Korean</label>
-          </div>
-          <div>
-            <label><input type="checkbox" name="language" value="Dutch"> Dutch</label>
-            <label><input type="checkbox" name="language" value="French"> French</label>
-            <label><input type="checkbox" name="language" value="German"> German</label>
-            <label><input type="checkbox" name="language" value="Indonesian"> Indonesian</label>
-            <label><input type="checkbox" name="language" value="Polish"> Polish</label>
-            <label><input type="checkbox" name="language" value="Portuguese"> Portuguese</label>
-            <label><input type="checkbox" name="language" value="Russian"> Russian</label>
-            <label><input type="checkbox" name="language" value="Spanish"> Spanish</label>
-            <label><input type="checkbox" name="language" value="Thai"> Thai</label>
-          </div>
+          <div id="langLeft"></div>
+          <div id="langRight"></div>
         </div>
       </fieldset>
 
       <fieldset class="check-group">
         <legend>Condizione</legend>
-        <label><input type="checkbox" name="condition" value="NM/M"> NM/M</label>
-        <label><input type="checkbox" name="condition" value="SP"> SP</label>
-        <label><input type="checkbox" name="condition" value="HP"> HP</label>
-        <label><input type="checkbox" name="condition" value="D"> D</label>
+        <div id="condList"></div>
       </fieldset>
 
       <fieldset class="check-group">
         <legend>Foil</legend>
-        <label><input type="checkbox" name="foil" value="Reverse Holo"> Reverse Holo</label>
-        <label><input type="checkbox" name="foil" value="Holo"> Holo</label>
+        <div id="foilList"></div>
       </fieldset>
 
       <fieldset class="check-group">
@@ -121,10 +110,16 @@
 
   <div class="toolbar">
     <span id="info">Caricamento...</span>
-    <div class="pagination">
-      <button type="button" class="action secondary" id="prev" disabled>← Precedente</button>
-      <span id="pageInfo">Pagina 1</span>
-      <button type="button" class="action secondary" id="next" disabled>Successiva →</button>
+    <div class="toolbar-right">
+      <div class="export-group">
+        <button type="button" class="action secondary" id="btnXlsx" disabled title="Esporta tutte le pagine della ricerca attuale">Esporta Excel</button>
+        <button type="button" class="action secondary" id="btnCsv" disabled title="Esporta tutte le pagine della ricerca attuale">Esporta CSV</button>
+      </div>
+      <div class="pagination">
+        <button type="button" class="action secondary" id="prev" disabled>← Precedente</button>
+        <span id="pageInfo">Pagina 1</span>
+        <button type="button" class="action secondary" id="next" disabled>Successiva →</button>
+      </div>
     </div>
   </div>
 
@@ -149,173 +144,157 @@
     </table>
   </div>
 
+  <script src="../dati-buylist.js"></script>
+  <script src="../filtri-buylist.js"></script>
+  <script src="../esporta-ricerca.js"></script>
   <script>
-    const SUPABASE_URL = 'https://tjdmspsbcvyvmvxvqjop.supabase.co';
-    const SUPABASE_ANON_KEY = 'sb_publishable_qPV-hACz7ru0agM5aNW_XQ_d_CKbyER';
+    CGCDati.impostaBase('../data/');
 
-    let PAGE_SIZE = 50;
-    let currentPage = 0;
-    let hasMore = false;
-    let lastRowsCount = 0;
-    let knownTotal = null;
-    let debounceTimer = null;
-    let searchId = 0;
+    var PAGE_SIZE = 50;
+    var currentPage = 0;
+    var debounceTimer = null;
+    var searchId = 0;
+    var meta = null;
+    var caricati = {};          // gruppo -> righe già pronte
+    var risultati = [];         // TUTTE le righe della ricerca attuale (ordinate): servono anche all'esportazione
+    var ordineAttuale = 'buono_desc';
 
-    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    function $(id) { return document.getElementById(id); }
 
     function checkedValues(name) {
       return Array.from(document.querySelectorAll('input[name="' + name + '"]:checked'))
-        .map(function(el) { return el.value; });
+        .map(function (el) { return el.value; });
     }
 
     function getFilters() {
       return {
-        name: document.getElementById('name').value.trim(),
-        expansion: document.getElementById('expansion').value.trim(),
-        serial: document.getElementById('serial').value.trim(),
+        name: $('name').value.trim(),
+        expansion: $('expansion').value.trim(),
+        serial: $('serial').value.trim(),
         languages: checkedValues('language'),
         conditions: checkedValues('condition'),
         foils: checkedValues('foil'),
         firstEditions: checkedValues('firstEdition'),
         statuses: checkedValues('status'),
-        minCash: document.getElementById('minCash').value,
-        minBuono: document.getElementById('minBuono').value,
-        sort: document.getElementById('sort').value
+        minCash: $('minCash').value,
+        minBuono: $('minBuono').value,
+        sort: $('sort').value
       };
     }
 
-    function buildQuery(filters) {
-      // count:exact per totale pagine (funziona sui filtri "con prezzo")
-      var q = sb
-        .from('cgc_buylist')
-        .select(
-          'name, name_en, expansion, serial_number, image, language, condition, foil, first_edition, buylist, credit, status',
-          { count: 'exact' }
-        )
-        .range(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE - 1);
-
-      if (filters.name) q = q.ilike('name', '%' + filters.name + '%');
-      if (filters.expansion) q = q.ilike('expansion', '%' + filters.expansion + '%');
-      if (filters.serial) q = q.ilike('serial_number', '%' + filters.serial + '%');
-
-      if (filters.languages.length === 1) q = q.eq('language', filters.languages[0]);
-      else if (filters.languages.length > 1) q = q.in('language', filters.languages);
-
-      if (filters.conditions.length === 1) q = q.eq('condition', filters.conditions[0]);
-      else if (filters.conditions.length > 1) q = q.in('condition', filters.conditions);
-
-      if (filters.foils.length === 1) q = q.eq('foil', filters.foils[0]);
-      else if (filters.foils.length > 1) q = q.in('foil', filters.foils);
-
-      if (filters.firstEditions.length === 1) {
-        if (filters.firstEditions[0] === '__empty__') q = q.eq('first_edition', '');
-        else q = q.eq('first_edition', filters.firstEditions[0]);
-      }
-
-      if (filters.statuses.length === 1) q = q.eq('status', filters.statuses[0]);
-      else if (filters.statuses.length > 1) q = q.in('status', filters.statuses);
-
-      if (filters.minCash) q = q.gte('buylist', filters.minCash);
-      if (filters.minBuono) q = q.gte('credit', filters.minBuono);
-
-      // Ordinamento SERVER: Cash (buylist) ok; Buono (credit) da solo ancora lento →
-      // usiamo credit solo se c'è un filtro selettivo (nome), altrimenti buylist
-      var sort = filters.sort;
-      var hasName = !!filters.name;
-      if (sort === 'cash_desc') q = q.order('buylist', { ascending: false });
-      else if (sort === 'cash_asc') q = q.order('buylist', { ascending: true });
-      else if (sort === 'buono_desc') {
-        if (hasName) q = q.order('credit', { ascending: false });
-        else q = q.order('buylist', { ascending: false }); // proxy globale finché manca indice su credit
-      } else if (sort === 'buono_asc') {
-        if (hasName) q = q.order('credit', { ascending: true });
-        else q = q.order('buylist', { ascending: true });
-      } else if (sort === 'name_asc') q = q.order('name', { ascending: true });
-
-      return q;
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
-    function sortClient(rows, sort) {
-      if (!sort || !rows.length) return rows;
-      var copy = rows.slice();
-      if (sort === 'cash_desc') {
-        copy.sort(function(a, b) { return (Number(b.buylist) || 0) - (Number(a.buylist) || 0); });
-      } else if (sort === 'cash_asc') {
-        copy.sort(function(a, b) { return (Number(a.buylist) || 0) - (Number(b.buylist) || 0); });
-      } else if (sort === 'buono_desc') {
-        copy.sort(function(a, b) { return (Number(b.credit) || 0) - (Number(a.credit) || 0); });
-      } else if (sort === 'buono_asc') {
-        copy.sort(function(a, b) { return (Number(a.credit) || 0) - (Number(b.credit) || 0); });
-      } else if (sort === 'name_asc') {
-        copy.sort(function(a, b) {
-          return String(a.name || '').localeCompare(String(b.name || ''), 'it', { sensitivity: 'base' });
-        });
-      }
-      return copy;
+    /* ---------- caricamento dati ---------- */
+    function showNotice(testo) {
+      var n = $('notice');
+      n.textContent = testo || '';
+      n.classList.toggle('show', !!testo);
     }
 
+    function righeBase(gruppi) {
+      var out = [];
+      gruppi.forEach(function (g) { out = out.concat(caricati[g] || []); });
+      return out;
+    }
+
+    async function assicuraDati(gruppi) {
+      var mancanti = gruppi.filter(function (g) { return !caricati[g]; });
+      if (!mancanti.length) return;
+      var liste = await Promise.all(mancanti.map(function (g) { return CGCDati.carica([g]); }));
+      mancanti.forEach(function (g, i) { caricati[g] = CGCFiltri.prepara(liste[i]); });
+    }
+
+    /* ---------- caselle dei filtri costruite dai dati ---------- */
+    function casella(nome, o) {
+      return '<label><input type="checkbox" name="' + nome + '" value="' + escapeHtml(o.valore) + '"> ' +
+        escapeHtml(o.etichetta) + '</label>';
+    }
+
+    function valoriFiltri(campo) {
+      var conteggi = {}, vf = (meta && meta.valori_filtri) || {};
+      Object.keys(vf).forEach(function (g) {
+        (vf[g][campo] || []).forEach(function (coppia) { conteggi[coppia[0]] = (conteggi[coppia[0]] || 0) + coppia[1]; });
+      });
+      return Object.keys(conteggi);
+    }
+
+    function costruisciFiltri() {
+      var lingue = CGCFiltri.opzioniLingua(valoriFiltri('language'));
+      $('langLeft').innerHTML = lingue.sinistra.map(function (o) { return casella('language', o); }).join('');
+      $('langRight').innerHTML = lingue.destra.map(function (o) { return casella('language', o); }).join('');
+      $('condList').innerHTML = CGCFiltri.opzioniCondizione(valoriFiltri('condition')).map(function (o) { return casella('condition', o); }).join('');
+      $('foilList').innerHTML = CGCFiltri.opzioniFoil(valoriFiltri('foil')).map(function (o) { return casella('foil', o); }).join('');
+      document.querySelectorAll('.filters input[type="checkbox"]').forEach(function (el) {
+        el.addEventListener('change', function () { search(true); });
+      });
+    }
+
+    function mostraMeta() {
+      var line = $('metaLine');
+      if (!meta || !meta.generato_il) { line.textContent = ''; return; }
+      var quando = new Date(meta.generato_il);
+      var ore = (Date.now() - quando.getTime()) / 3600000;
+      var testo = 'Dati aggiornati il ' + quando.toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' }) +
+        ' (si aggiornano ogni ora)';
+      if (meta.dati_controllati_dal) {
+        line.title = 'Carte controllate sul sito dal ' + new Date(meta.dati_controllati_dal).toLocaleString('it-IT') +
+          ' al ' + new Date(meta.dati_controllati_fino_al).toLocaleString('it-IT');
+      }
+      if (ore > 3) testo += ' · attenzione: l\u2019ultimo aggiornamento risale a circa ' + Math.round(ore) + ' ore fa';
+      line.textContent = testo;
+      line.classList.toggle('stale', ore > 3);
+    }
+
+    /* ---------- ricerca ---------- */
     async function search(resetPage) {
       if (resetPage === undefined) resetPage = true;
-      if (resetPage) {
-        currentPage = 0;
-        knownTotal = null;
-      }
-
+      if (resetPage) currentPage = 0;
       var myId = ++searchId;
       var filters = getFilters();
-      document.getElementById('info').textContent = 'Caricamento...';
-
+      var gruppi = CGCFiltri.gruppiNecessari(filters.statuses);
+      var daCaricare = gruppi.some(function (g) { return !caricati[g]; });
+      if (daCaricare) $('info').textContent = 'Caricamento dati...';
       try {
-        var result = await buildQuery(filters);
-        if (myId !== searchId) return;
-
-        if (result.error) {
-          var msg = result.error.message || 'Errore sconosciuto';
-          if (msg.indexOf('timeout') !== -1 || msg.indexOf('canceling') !== -1) {
-            msg = 'Timeout del database. Prova a mettere un Nome, oppure togli un filtro prezzo. Gli indici su Supabase risolveranno questo.';
-          }
-          document.getElementById('info').textContent = 'Errore: ' + msg;
-          console.error(result.error);
-          return;
-        }
-
-        var rows = result.data || [];
-        lastRowsCount = rows.length;
-        if (typeof result.count === 'number' && result.count >= 0) {
-          knownTotal = result.count;
-          hasMore = (currentPage + 1) * PAGE_SIZE < knownTotal;
-        } else {
-          hasMore = rows.length === PAGE_SIZE;
-          if (!hasMore) knownTotal = currentPage * PAGE_SIZE + rows.length;
-        }
-
-        // Riordino client solo se ordinamento Buono senza nome (server ha usato buylist)
-        if ((filters.sort === 'buono_desc' || filters.sort === 'buono_asc') && !filters.name) {
-          rows = sortClient(rows, filters.sort);
-        }
-        renderTable(rows);
-        updatePagination();
+        await assicuraDati(gruppi);
       } catch (err) {
         if (myId !== searchId) return;
-        document.getElementById('info').textContent = 'Errore di rete: ' + err.message;
+        $('info').textContent = 'Errore: impossibile leggere i dati (' + err.message + '). Riprova tra poco.';
         console.error(err);
+        return;
       }
+      if (myId !== searchId) return;
+      ordineAttuale = filters.sort;
+      risultati = CGCFiltri.ordina(CGCFiltri.filtra(righeBase(gruppi), filters), filters.sort);
+      var pagine = Math.max(1, Math.ceil(risultati.length / PAGE_SIZE));
+      if (currentPage >= pagine) currentPage = pagine - 1;
+      renderPagina();
     }
 
     function scheduleSearch() {
       clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(function() { search(true); }, 400);
+      debounceTimer = setTimeout(function () { search(true); }, 400);
+    }
+
+    function renderPagina() {
+      var inizio = currentPage * PAGE_SIZE;
+      var righe = risultati.slice(inizio, inizio + PAGE_SIZE);
+      renderTable(righe);
+      updatePagination(righe.length);
     }
 
     function renderTable(rows) {
-      var tbody = document.getElementById('rows');
+      var tbody = $('rows');
       if (!rows.length) {
         tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:1.5rem">Nessun risultato</td></tr>';
         return;
       }
-      tbody.innerHTML = rows.map(function(r) {
-        var img = r.image
-          ? '<img src="' + r.image + '" alt="" loading="lazy" class="thumb" onerror="this.style.display=\'none\'">'
+      tbody.innerHTML = rows.map(function (r) {
+        var img = r.image && /^https?:\/\//i.test(r.image)
+          ? '<img src="' + escapeHtml(r.image) + '" alt="" loading="lazy" class="thumb" onerror="this.style.display=\'none\'">'
           : '';
         return '<tr>' +
           '<td class="img-cell">' + img + '</td>' +
@@ -335,28 +314,21 @@
       }).join('');
     }
 
-    function updatePagination() {
-      var pageNum = currentPage + 1;
-      var from = currentPage * PAGE_SIZE + (lastRowsCount ? 1 : 0);
-      var to = currentPage * PAGE_SIZE + lastRowsCount;
-      var infoText, pageText;
-
-      if (lastRowsCount === 0) {
-        infoText = 'Nessun risultato';
-        pageText = 'Pagina 1';
-      } else if (knownTotal !== null) {
-        var totalPages = Math.max(1, Math.ceil(knownTotal / PAGE_SIZE));
-        infoText = 'Risultati ' + from + '–' + to + ' di ' + knownTotal.toLocaleString('it-IT');
-        pageText = 'Pagina ' + pageNum + ' di ' + totalPages;
+    function updatePagination(righeInPagina) {
+      var totale = risultati.length;
+      var totalPages = Math.max(1, Math.ceil(totale / PAGE_SIZE));
+      var from = currentPage * PAGE_SIZE + (righeInPagina ? 1 : 0);
+      var to = currentPage * PAGE_SIZE + righeInPagina;
+      if (!totale) {
+        $('info').textContent = 'Nessun risultato';
+        $('pageInfo').textContent = 'Pagina 1';
       } else {
-        infoText = 'Risultati ' + from + '–' + to + ' · almeno ' + to;
-        pageText = 'Pagina ' + pageNum + ' · altre pagine disponibili';
+        $('info').textContent = 'Risultati ' + from + '–' + to + ' di ' + totale.toLocaleString('it-IT');
+        $('pageInfo').textContent = 'Pagina ' + (currentPage + 1) + ' di ' + totalPages;
       }
-
-      document.getElementById('info').textContent = infoText;
-      document.getElementById('pageInfo').textContent = pageText;
-      document.getElementById('prev').disabled = currentPage === 0;
-      document.getElementById('next').disabled = !hasMore;
+      $('prev').disabled = currentPage === 0;
+      $('next').disabled = currentPage + 1 >= totalPages;
+      $('btnXlsx').disabled = $('btnCsv').disabled = !totale;
     }
 
     function formatPrice(v) {
@@ -372,20 +344,31 @@
       return '';
     }
 
-    function escapeHtml(str) {
-      return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
+    /* ---------- esportazione: tutte le pagine della ricerca attuale ---------- */
+    async function esporta(formato) {
+      if (!risultati.length) return;
+      var opzioni = {
+        aggiornatoAl: meta && meta.generato_il ? new Date(meta.generato_il).toLocaleString('it-IT') : '',
+        filtri: CGCFiltri.descrivi(getFilters()),
+        ordinamento: CGCFiltri.ETICHETTE_ORDINE[ordineAttuale] || ''
+      };
+      try {
+        var blob = formato === 'xlsx' ? await CGCEsporta.xlsx(risultati, opzioni) : CGCEsporta.csv(risultati, opzioni);
+        CGCEsporta.scarica(blob, CGCEsporta.nomeFile(formato));
+        showNotice('');
+      } catch (err) {
+        showNotice(err.message);
+        console.error(err);
+      }
     }
 
+    /* ---------- impostazioni ---------- */
     function loadSettings() {
       try {
         var dark = localStorage.getItem('cgc_dark') === '1';
         var ps = localStorage.getItem('cgc_pagesize') || '50';
-        document.getElementById('optDark').checked = dark;
-        document.getElementById('optPageSize').value = ps;
+        $('optDark').checked = dark;
+        $('optPageSize').value = ps;
         document.body.classList.toggle('dark', dark);
         PAGE_SIZE = parseInt(ps, 10) || 50;
       } catch (e) {}
@@ -393,41 +376,45 @@
 
     function saveSettings() {
       try {
-        localStorage.setItem('cgc_dark', document.getElementById('optDark').checked ? '1' : '0');
-        localStorage.setItem('cgc_pagesize', document.getElementById('optPageSize').value);
+        localStorage.setItem('cgc_dark', $('optDark').checked ? '1' : '0');
+        localStorage.setItem('cgc_pagesize', $('optPageSize').value);
       } catch (e) {}
     }
 
-    document.getElementById('btnSettings').onclick = function() {
-      document.getElementById('settingsPanel').classList.toggle('open');
-    };
-    document.getElementById('optDark').onchange = function() {
-      document.body.classList.toggle('dark', this.checked);
-      saveSettings();
-    };
-    document.getElementById('optPageSize').onchange = function() {
+    $('btnSettings').onclick = function () { $('settingsPanel').classList.toggle('open'); };
+    $('optDark').onchange = function () { document.body.classList.toggle('dark', this.checked); saveSettings(); };
+    $('optPageSize').onchange = function () {
       PAGE_SIZE = parseInt(this.value, 10) || 50;
       saveSettings();
-      search(true);
+      currentPage = 0;
+      renderPagina();
     };
-
-    document.querySelectorAll('.filters input[type="text"], .filters input[type="number"]').forEach(function(el) {
+    document.querySelectorAll('.filters input[type="text"], .filters input[type="number"]').forEach(function (el) {
       el.addEventListener('input', scheduleSearch);
     });
-    document.querySelectorAll('.filters input[type="checkbox"]').forEach(function(el) {
-      el.addEventListener('change', function() { search(true); });
-    });
-    document.getElementById('sort').addEventListener('change', function() { search(true); });
-
-    document.getElementById('prev').onclick = function() {
-      if (currentPage > 0) { currentPage--; search(false); }
+    $('sort').addEventListener('change', function () { search(true); });
+    $('prev').onclick = function () { if (currentPage > 0) { currentPage--; renderPagina(); } };
+    $('next').onclick = function () {
+      if ((currentPage + 1) * PAGE_SIZE < risultati.length) { currentPage++; renderPagina(); }
     };
-    document.getElementById('next').onclick = function() {
-      if (hasMore) { currentPage++; search(false); }
-    };
+    $('btnXlsx').onclick = function () { esporta('xlsx'); };
+    $('btnCsv').onclick = function () { esporta('csv'); };
 
-    loadSettings();
-    search(true);
+    /* ---------- avvio ---------- */
+    (async function avvia() {
+      loadSettings();
+      try {
+        meta = await CGCDati.meta();
+      } catch (err) {
+        $('metaLine').textContent = '';
+        $('info').textContent = 'Errore: impossibile leggere i dati (' + err.message + '). Riprova tra poco.';
+        console.error(err);
+        return;
+      }
+      mostraMeta();
+      costruisciFiltri();
+      search(true);
+    })();
   </script>
 </body>
 </html>
