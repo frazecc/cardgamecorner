@@ -120,6 +120,26 @@ def write_site(groups, rows, checked, docs_dir, out_dir, now=None):
 
 # ----------------------------------------------------------------------------- lettura da Supabase
 
+class SupabaseReader:
+    """Client minimo di sola lettura (serve solo `requests`; non carica scraper, pandas o Playwright)."""
+
+    def __init__(self, url, secret, session=None):
+        import requests
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        if (parsed.scheme != 'https' or not parsed.hostname or not parsed.hostname.endswith('.supabase.co')
+                or parsed.username or parsed.password or parsed.port or parsed.query or parsed.fragment
+                or parsed.path not in ('', '/')):
+            raise ValueError("SUPABASE_URL deve essere l'URL HTTPS ufficiale del progetto.")
+        if not secret or secret.startswith('sb_publishable_'):
+            raise ValueError('Configura SUPABASE_SERVICE_ROLE_KEY come secret GitHub, mai nel codice.')
+        self.url = url.rstrip('/')
+        self.session = session or requests.Session()
+        self.headers = {'apikey': secret, 'Accept': 'application/json'}
+        # Le nuove secret key (sb_secret_...) non sono JWT: vanno solo nell'header apikey.
+        if not secret.startswith('sb_secret_'):
+            self.headers['Authorization'] = 'Bearer ' + secret
+
 def _get(client, path, params, tries=6):
     import requests
     for attempt in range(tries):
@@ -184,11 +204,10 @@ def main(argv=None):
                         help='sotto questo numero di righe non pubblica nulla (protezione da database vuoto)')
     args = parser.parse_args(argv)
 
-    from supabase_sync import SupabaseClient
     url = os.environ.get('SUPABASE_URL', '')
     if not url:
         sys.exit('Manca la variabile GitHub SUPABASE_URL (Settings > Secrets and variables > Actions > Variables).')
-    client = SupabaseClient(url, os.environ.get('SUPABASE_SERVICE_ROLE_KEY', ''))
+    client = SupabaseReader(url, os.environ.get('SUPABASE_SERVICE_ROLE_KEY', ''))
 
     rows = fetch_rows(client)
     print('Righe lette: %d' % len(rows), flush=True)
