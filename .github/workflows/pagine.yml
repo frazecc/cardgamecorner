@@ -20,6 +20,7 @@ on:
       - '.github/workflows/pagine.yml'
 
 permissions:
+  actions: read      # serve a deploy-pages per ritrovare l'artefatto appena caricato
   contents: read
   pages: write
   id-token: write
