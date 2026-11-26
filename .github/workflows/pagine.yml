@@ -1,0 +1,66 @@
+name: Pubblica il sito e i dati
+
+# Ogni ora (e a ogni modifica di docs/ o di esporta_json.py) legge la buylist da Supabase,
+# crea i file data/*.json e pubblica il sito su GitHub Pages SENZA fare commit nel repository.
+#
+# PRIMA DI USARLO: Settings -> Pages -> Build and deployment -> Source = "GitHub Actions".
+# Servono anche la variabile SUPABASE_URL e il secret SUPABASE_SERVICE_ROLE_KEY
+# (Settings -> Secrets and variables -> Actions).
+# Se la lettura da Supabase fallisce il workflow si ferma e resta online il sito precedente.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'esporta_json.py'
+      - '.github/workflows/pagine.yml'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  pubblica:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    env:
+      SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Installa dipendenze
+        run: python -m pip install requests
+      - name: Verifica configurazione
+        run: |
+          if [[ -z "$SUPABASE_URL" ]]; then
+            echo 'Crea la variabile GitHub SUPABASE_URL (Settings > Secrets and variables > Actions > Variables).'
+            exit 1
+          fi
+          if [[ -z "$SUPABASE_SERVICE_ROLE_KEY" ]]; then
+            echo 'Crea il secret GitHub SUPABASE_SERVICE_ROLE_KEY (la chiave SEGRETA del progetto Supabase).'
+            exit 1
+          fi
+      - name: Genera il sito e i dati
+        run: python -u esporta_json.py --out sito
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: sito
+      - name: Pubblica su GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
