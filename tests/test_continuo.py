@@ -287,5 +287,79 @@ class WorkTests(unittest.TestCase):
         self.assertEqual(done, 1)
 
 
+
+class EmptyResponseProtectionTests(unittest.TestCase):
+    """Il 25/11/2026 il sito ha risposto "vuoto" a centinaia di ricerche e la pulizia ha tolto le carte."""
+
+    run_work = WorkTests.run_work
+
+    def test_empty_search_is_rechecked_with_a_fresh_session(self):
+        client = FakeClient([claim('7', 'Base')])
+        card = prepare_card(make_row(1))
+        answers = [(0, 0), (1, 1)]
+
+        def scan(site, query, save, check, timeout):
+            cards, pages = answers.pop(0)
+            if cards:
+                save(1, [card])
+            return cards, pages
+
+        done, site = self.run_work(client, scan, max_queries=1)
+        self.assertEqual(done, 1)
+        self.assertEqual(site.opened, 2)  # apertura iniziale + sessione nuova per il ricontrollo
+        finished = [body for name, body in client.calls if name == 'cgc_live_finish'][0]
+        self.assertEqual(finished['p_cards'], 1)
+
+    def test_confirmed_empty_search_completes_when_the_control_search_works(self):
+        client = FakeClient([claim('7', 'Base')])
+        scanned = []
+
+        def scan(site, query, save, check, timeout):
+            scanned.append(query['name'])
+            return (3, 1) if query['name'] == 'Jungle' else (0, 0)
+
+        done, _ = self.run_work(client, scan, max_queries=1)
+        self.assertEqual(done, 1)
+        self.assertEqual(scanned, ['Base', 'Base', 'Jungle'])
+        finished = [body for name, body in client.calls if name == 'cgc_live_finish'][0]
+        self.assertEqual(finished['p_cards'], 0)
+        self.assertNotIn('cgc_live_save_page', client.names())
+
+    def test_silent_site_stops_without_marking_the_search_complete(self):
+        client = FakeClient([claim('7', 'Base'), claim('8', 'Jungle')])
+        with self.assertRaises(continuo.SiteSilent):
+            self.run_work(client, lambda *a: (0, 0), max_queries=2)
+        self.assertIn('cgc_live_fail', client.names())
+        self.assertNotIn('cgc_live_finish', client.names())
+        self.assertNotIn('cgc_live_clean', client.names())
+
+    def test_run_stops_when_too_many_cards_are_removed(self):
+        client = FakeClient([claim('7', 'Base'), claim('8', 'Jungle'), claim('7', 'Base')])
+        original = client.rpc
+
+        def rpc(name, body):
+            if name == 'cgc_live_clean':
+                client.calls.append((name, body))
+                return {'state': 'ESEGUITA', 'rimosse': 300}
+            return original(name, body)
+
+        client.rpc = rpc
+        with self.assertRaises(continuo.TooManyRemoved):
+            self.run_work(client, lambda *a: (1, 1), max_queries=3, max_removed=500)
+        self.assertEqual(client.names().count('cgc_live_finish'), 2)
+
+    def test_browser_session_is_renewed_periodically(self):
+        client = FakeClient([claim('7', 'Base'), claim('8', 'Jungle'), claim('7', 'Base')])
+        clock = Clock()
+
+        def scan(site, query, save, check, timeout):
+            clock.now += 1000
+            return 1, 1
+
+        done, site = self.run_work(client, scan, clock=clock, max_queries=3, max_runtime=10000, refresh=1500)
+        self.assertEqual(done, 3)
+        self.assertEqual(site.opened, 2)  # apertura iniziale + un rinnovo prima della terza ricerca
+
+
 if __name__ == '__main__':
     unittest.main()
