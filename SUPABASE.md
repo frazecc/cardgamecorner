@@ -1,5 +1,5 @@
 # Buylist CardGameCorner su Supabase
-
+ 
 Progetto dedicato: `cardgamecorner-buylist`, organizzazione `bdimmagini`.
 Riferimento: `uzvvzuoorpdivanwbsen`.
 URL API: `https://uzvvzuoorpdivanwbsen.supabase.co`.

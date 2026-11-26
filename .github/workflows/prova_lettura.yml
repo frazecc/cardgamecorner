@@ -1,0 +1,43 @@
+name: Prova lettura espansione
+
+# Legge alcune espansioni del sito CardGameCorner come fa lo scanner, ma NON scrive nulla su Supabase
+# e non usa nessun secret. Salva screenshot e dettagli nell'artefatto "Prova-lettura" (7 giorni).
+# Uso: Actions -> Prova lettura espansione -> Run workflow (nomi separati da |).
+
+on:
+  workflow_dispatch:
+    inputs:
+      espansioni:
+        description: 'Nomi delle espansioni separati da |'
+        default: 'Dragons Exalted|151|Evolving Skies'
+
+permissions:
+  contents: read
+
+jobs:
+  prova:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      ESPANSIONI: ${{ inputs.espansioni }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Installa dipendenze
+        run: python -m pip install -r requirements.txt
+      - name: Installa Chromium
+        run: python -m playwright install --with-deps chromium
+      - name: Leggi le espansioni
+        run: python -u prova_lettura.py --out prova 2>&1 | tee prova.log
+      - name: Conserva screenshot e dettagli
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Prova-lettura
+          path: |
+            prova/
+            prova.log
+          retention-days: 7
+          if-no-files-found: warn
