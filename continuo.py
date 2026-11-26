@@ -20,6 +20,20 @@ from supabase_sync import DEFAULT_URL, SupabaseClient, batches, prepare_card
 
 GENERAL = {'id': None, 'name': 'Ricerca generale'}
 MAX_CONSECUTIVE_FAILURES = 6
+# Protezioni contro un sito che smette di rispondere (visto il 25/11/2026: centinaia di ricerche
+# "vuote" e catalogo svuotato dalla pulizia): sessione rinnovata ogni 30 minuti, ricerche vuote
+# ricontrollate con una sessione nuova e con una ricerca di controllo, stop se vengono tolte troppe carte.
+REFRESH_SECONDS = 1800
+MAX_REMOVED_PER_RUN = 500
+CANARY_NAMES = ('Southern Islands', 'Jungle', 'Base', 'Fossil')
+
+
+class SiteSilent(RuntimeError):
+    """Il sito non restituisce piu carte: meglio fermarsi che segnare ricerche vuote."""
+
+
+class TooManyRemoved(RuntimeError):
+    """In un solo run sono state tolte troppe carte: serve un controllo manuale."""
 
 # Stesso criterio di scraper.py: Angular puo codificare lo stesso ID come
 # number:123, string:123 o valore semplice. Si usa il valore reale dell'opzione.
@@ -174,7 +188,8 @@ def scan_query(site, query, on_page, check_time, timeout):
 
 
 def work(client, site, run_id, max_runtime, grace=900, max_queries=None, pause=3.0, timeout=120,
-         clock=time.monotonic, sleep=time.sleep, scan=scan_query):
+         clock=time.monotonic, sleep=time.sleep, scan=scan_query, refresh=REFRESH_SECONDS,
+         max_removed=MAX_REMOVED_PER_RUN):
     """Ciclo principale. Restituisce il numero di ricerche completate."""
     editions = site.open()
     queries = {query_key(q['id']): q for q in [GENERAL] + editions}
@@ -184,13 +199,37 @@ def work(client, site, run_id, max_runtime, grace=900, max_queries=None, pause=3
     start = clock()
     soft_deadline = start + max_runtime
     hard_deadline = soft_deadline + grace
-    completed = failures = 0
+    completed = failures = removed_total = 0
+    session_started = start
+    good = {}  # ricerche che in questo run hanno restituito carte: chiave -> numero di carte
 
     def check_time():
         if clock() > hard_deadline:
             raise TimeoutError('Tempo massimo del run raggiunto: ricerca interrotta, i dati gia salvati restano.')
 
+    def reopen():
+        nonlocal editions, queries, session_started
+        editions = site.open()
+        queries = {query_key(q['id']): q for q in [GENERAL] + editions}
+        session_started = clock()
+
+    def canary():
+        """Ricerca piccola che di solito ha carte, per capire se il sito risponde davvero."""
+        if good:
+            return queries.get(min(good, key=lambda k: good[k]))
+        for wanted in CANARY_NAMES:
+            for edition in editions:
+                if edition['name'] == wanted:
+                    return queries.get(query_key(edition['id']))
+        return None
+
     while clock() < soft_deadline and (max_queries is None or completed < max_queries):
+        if refresh and clock() - session_started >= refresh:
+            try:
+                reopen()
+                print('Sessione del browser rinnovata.', flush=True)
+            except Exception as error:
+                print(f'Rinnovo della sessione non riuscito (continuo con quella attuale): {error}', flush=True)
         claim = client.rpc('cgc_live_claim', {'p_run': run_id})
         if not claim:
             print('Nessuna ricerca disponibile (tutte in lavorazione): attendo.', flush=True)
@@ -205,20 +244,51 @@ def work(client, site, run_id, max_runtime, grace=900, max_queries=None, pause=3
                 client.rpc('cgc_live_save_page', {'p_run': run_id, 'p_query': key,
                                                   'p_page': page_number, 'p_batch': block})
 
+        removed = 0
         try:
             query = queries.get(key)
             if query is None:
                 raise RuntimeError(f'Ricerca non piu presente sul sito: {name}')
             cards, pages = scan(site, query, save, check_time, timeout)
+            if cards == 0:
+                # Una risposta vuota non basta: una sessione "stanca" del browser puo non ricevere dati.
+                if query['id'] is not None:
+                    print('  Risposta vuota: la ricontrollo con una sessione nuova.', flush=True)
+                    reopen()
+                    query = queries.get(key)
+                    if query is None:
+                        raise RuntimeError(f'Ricerca non piu presente sul sito: {name}')
+                    cards, pages = scan(site, query, save, check_time, timeout)
+                if cards == 0:
+                    probe = canary()
+                    if probe is not None and probe['id'] != query['id']:
+                        found, _ = scan(site, probe, lambda page_number, rows: None, check_time, timeout)
+                        if found == 0:
+                            raise SiteSilent(
+                                f"Il sito non restituisce carte nemmeno per '{probe['name']}': "
+                                f"la ricerca '{name}' non viene segnata come vuota e lo scanner si ferma.")
+            if cards and query['id'] is not None:
+                good[key] = cards
             client.rpc('cgc_live_finish', {'p_run': run_id, 'p_query': key, 'p_started': started.isoformat(),
                                            'p_cards': cards, 'p_pages': pages})
             completed += 1
             failures = 0
             print(f'  Completata: {cards} carte in {pages} pagine.', flush=True)
             try:
-                print(f"  Pulizia: {client.rpc('cgc_live_clean', {'p_force': False})}", flush=True)
+                cleaned = client.rpc('cgc_live_clean', {'p_force': False})
+                print(f'  Pulizia: {cleaned}', flush=True)
+                if isinstance(cleaned, dict) and isinstance(cleaned.get('rimosse'), int):
+                    removed = cleaned['rimosse']
             except Exception as error:
                 print(f'  Pulizia non eseguita (si riprova al prossimo giro): {error}', flush=True)
+        except SiteSilent as error:
+            message = f'{type(error).__name__}: {error}'
+            print(f'  ERRORE nella ricerca {name}: {message}', flush=True)
+            try:
+                client.rpc('cgc_live_fail', {'p_run': run_id, 'p_query': key, 'p_error': message})
+            except Exception as report_error:
+                print(f'  Errore non registrato su Supabase: {report_error}', flush=True)
+            raise
         except Exception as error:
             failures += 1
             message = f'{type(error).__name__}: {error}'
@@ -231,8 +301,11 @@ def work(client, site, run_id, max_runtime, grace=900, max_queries=None, pause=3
                 raise RuntimeError(f'{failures} errori consecutivi: scanner fermato.') from error
             sleep(min(30 * failures, 120))
             # Sessione nuova dopo un errore: lo stato della pagina non e piu affidabile.
-            editions = site.open()
-            queries = {query_key(q['id']): q for q in [GENERAL] + editions}
+            reopen()
+        removed_total += removed
+        if max_removed and removed_total > max_removed:
+            raise TooManyRemoved(f'In questo run sono state tolte {removed_total} carte (limite {max_removed}): '
+                                 'mi fermo per un controllo manuale.')
         sleep(pause)
     print(f'Fine del run: {completed} ricerche completate.', flush=True)
     return completed
@@ -246,6 +319,8 @@ def main():
                         help='Secondi extra per chiudere la ricerca in corso (default 900)')
     parser.add_argument('--max-ricerche', type=int, help='Si ferma dopo N ricerche completate (prova)')
     parser.add_argument('--timeout', type=int, default=120, help='Timeout in secondi per ogni pagina')
+    parser.add_argument('--max-rimosse', type=int, default=MAX_REMOVED_PER_RUN,
+                        help='Si ferma se in un run vengono tolte piu di N carte (0 = nessun limite)')
     parser.add_argument('--pausa', type=float, default=3.0, help='Secondi di pausa tra una ricerca e la successiva')
     parser.add_argument('--run-id', default=os.environ.get('GITHUB_RUN_ID') or datetime.now(timezone.utc).strftime('locale-%Y%m%d%H%M%S'))
     parser.add_argument('--headed', action='store_true', help='Mostra il browser (solo prove locali)')
@@ -262,7 +337,7 @@ def main():
         site = Site(playwright, args.timeout, args.headed, args.load_images)
         try:
             work(client, site, args.run_id, args.max_runtime, args.grace, args.max_ricerche,
-                 args.pausa, args.timeout)
+                 args.pausa, args.timeout, max_removed=args.max_rimosse)
         finally:
             site.close()
 
