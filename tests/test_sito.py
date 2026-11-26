@@ -45,7 +45,7 @@ class FilterLogicTests(unittest.TestCase):
 
 @unittest.skipUnless(browser_available(), 'Chromium non disponibile')
 class PageTests(unittest.TestCase):
-    """Apre davvero docs/nuovo/index.html in un browser con dati finti generati come in produzione."""
+    """Apre davvero docs/index.html in un browser con dati finti generati come in produzione."""
 
     @classmethod
     def setUpClass(cls):
@@ -62,7 +62,7 @@ class PageTests(unittest.TestCase):
         handler = functools.partial(QuietHandler, directory=str(Path(cls.tmp.name, 'sito')))
         cls.server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler)
         threading.Thread(target=cls.server.serve_forever, daemon=True).start()
-        cls.url = f'http://127.0.0.1:{cls.server.server_port}/nuovo/index.html'
+        cls.url = f'http://127.0.0.1:{cls.server.server_port}/index.html'
         cls.playwright = sync_playwright().start()
         cls.browser = cls.playwright.chromium.launch()
 
