@@ -30,6 +30,24 @@ assert.deepStrictEqual(nomi(F.ordina(righe, 'cash_desc')), ['Pokémon Speciale',
 assert.deepStrictEqual(nomi(F.ordina(righe, 'name_asc')), ['Abra', 'Pokémon Speciale', 'Zubat']);
 assert.strictEqual(F.ordina(righe, ''), righe);
 
+// espansioni scelte, massimi, nuovi ordinamenti
+const conEsp = F.prepara([
+  { name: 'B', expansion: 'Base', language: 'Italiano', condition: 'SP', foil: '', first_edition: '', buylist: 2, credit: 4, status: 'PREZZO DISPONIBILE' },
+  { name: 'A', expansion: 'Jungle', language: 'Italiano', condition: 'SP', foil: '', first_edition: '', buylist: 1, credit: 5, status: 'PREZZO DISPONIBILE' },
+  { name: 'C', expansion: 'Fossil', language: 'Italiano', condition: 'SP', foil: '', first_edition: '', buylist: null, credit: null, status: 'PREZZO DISPONIBILE' },
+]);
+assert.strictEqual(F.filtra(conEsp, { ...nessuno, expansions: null }).length, 3);
+assert.deepStrictEqual(nomi(F.filtra(conEsp, { ...nessuno, expansions: ['Jungle', 'Fossil'] })), ['A', 'C']);
+assert.strictEqual(F.filtra(conEsp, { ...nessuno, expansions: [] }).length, 0);
+assert.deepStrictEqual(nomi(F.filtra(conEsp, { ...nessuno, maxCash: '1,5' })), ['A']);
+assert.deepStrictEqual(nomi(F.filtra(conEsp, { ...nessuno, maxBuono: '4' })), ['B']);
+assert.deepStrictEqual(nomi(F.ordina(conEsp, 'name_desc')), ['C', 'B', 'A']);
+assert.deepStrictEqual(nomi(F.ordina(conEsp, 'diff_desc')), ['A', 'B', 'C']);     // differenze 4 e 2, poi senza prezzi in fondo
+assert.deepStrictEqual(nomi(F.ordina(conEsp, 'diff_asc')), ['B', 'A', 'C']);
+assert.deepStrictEqual(nomi(F.ordina(conEsp, 'ratio_desc')), ['A', 'B', 'C']);    // 5 e 2
+assert.deepStrictEqual(nomi(F.ordina(conEsp, 'exp_asc')), ['B', 'C', 'A']);
+assert.deepStrictEqual(F.descrivi({ ...nessuno, expansions: ['Base'], maxCash: '2.5' }), [['Espansioni', 'Base'], ['Cash massimo (€)', '2,5']]);
+
 // quali file dati servono
 assert.deepStrictEqual(F.gruppiNecessari(['PREZZO DISPONIBILE']), ['prezzi']);
 assert.deepStrictEqual(F.gruppiNecessari([]).sort(), ['escluse', 'prezzi', 'richiesta', 'senza-prezzo']);

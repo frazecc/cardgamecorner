@@ -8,7 +8,8 @@
  *   CGCFiltri.gruppiNecessari(stati)    -> quali file dati servono per gli stati scelti
  *   CGCFiltri.descrivi(filtri)          -> [['Lingua', 'Italiano, English'], ...] per il foglio "Informazioni"
  *   CGCFiltri.opzioniLingua / opzioniCondizione / opzioniFoil(valori) -> elenchi per le caselle dei filtri
- * filtri = { name, expansion, serial, languages[], conditions[], foils[], firstEditions[], statuses[], minCash, minBuono }
+ * filtri = { name, expansion, expansions[]|null, serial, languages[], conditions[], foils[], firstEditions[], statuses[],
+ *            minCash, minBuono, maxCash, maxBuono }   (expansions null = tutte; [] = nessuna)
  * Come nel sito originale: una categoria senza caselle spuntate non filtra nulla.
  */
 (function (root) {
@@ -23,7 +24,10 @@
   var FOIL_IN_ORDINE = ['Reverse Holo', 'Holo'];
   var ETICHETTE_ORDINE = {
     buono_desc: 'Buono decrescente', buono_asc: 'Buono crescente', cash_desc: 'Cash decrescente',
-    cash_asc: 'Cash crescente', name_asc: 'Nome A-Z', '': 'Nessun ordine'
+    cash_asc: 'Cash crescente', name_asc: 'Nome A-Z', name_desc: 'Nome Z-A',
+    diff_desc: 'Differenza Buono\u2212Cash decrescente', diff_asc: 'Differenza Buono\u2212Cash crescente',
+    ratio_desc: 'Rapporto Buono/Cash decrescente', ratio_asc: 'Rapporto Buono/Cash crescente',
+    exp_asc: 'Espansione A-Z', '': 'Nessun ordine'
   };
 
   function norm(s) {
@@ -53,11 +57,13 @@
     var haLingue = f.languages && f.languages.length, haCond = f.conditions && f.conditions.length;
     var haFoil = f.foils && f.foils.length, haPrime = f.firstEditions && f.firstEditions.length;
     var haStati = f.statuses && f.statuses.length;
-    var minCash = numero(f.minCash), minBuono = numero(f.minBuono);
+    var minCash = numero(f.minCash), minBuono = numero(f.minBuono), maxCash = numero(f.maxCash), maxBuono = numero(f.maxBuono);
+    var esps = Array.isArray(f.expansions) ? insieme(f.expansions) : null;   // null = tutte le espansioni
     return righe.filter(function (r) {
       if (nome && r._n.indexOf(nome) < 0) return false;
       if (esp && r._e.indexOf(esp) < 0) return false;
       if (ser && r._s.indexOf(ser) < 0) return false;
+      if (esps && !esps[r.expansion || VUOTO]) return false;
       if (haLingue && !lingue[r.language || VUOTO]) return false;
       if (haCond && !cond[r.condition || VUOTO]) return false;
       if (haFoil && !foil[r.foil || VUOTO]) return false;
@@ -65,12 +71,27 @@
       if (haStati && !stati[r.status]) return false;
       if (minCash !== null && !(r.buylist !== null && r.buylist >= minCash)) return false;
       if (minBuono !== null && !(r.credit !== null && r.credit >= minBuono)) return false;
+      if (maxCash !== null && !(r.buylist !== null && r.buylist <= maxCash)) return false;
+      if (maxBuono !== null && !(r.credit !== null && r.credit <= maxBuono)) return false;
       return true;
     });
   }
 
   function valore(r, campo) { return r[campo] === null || r[campo] === undefined ? 0 : Number(r[campo]) || 0; }
   function perNome(a, b) { return String(a.name || '').localeCompare(String(b.name || ''), 'it', { sensitivity: 'base' }); }
+
+  // Differenza e rapporto tra Buono e Cash: le righe senza entrambi i prezzi vanno sempre in fondo.
+  function differenza(r) { return r.credit == null || r.buylist == null ? null : Number(r.credit) - Number(r.buylist); }
+  function rapporto(r) { return r.credit == null || !Number(r.buylist) ? null : Number(r.credit) / Number(r.buylist); }
+  function perMisura(misura, verso) {
+    return function (a, b) {
+      var x = misura(a), y = misura(b);
+      if (x === null && y === null) return perNome(a, b);
+      if (x === null) return 1;
+      if (y === null) return -1;
+      return verso * (x - y) || perNome(a, b);
+    };
+  }
 
   function ordina(righe, ordine) {
     if (!ordine || !righe.length) return righe;
@@ -80,6 +101,12 @@
     else if (ordine === 'cash_desc') cmp = function (a, b) { return valore(b, 'buylist') - valore(a, 'buylist') || valore(b, 'credit') - valore(a, 'credit') || perNome(a, b); };
     else if (ordine === 'cash_asc') cmp = function (a, b) { return valore(a, 'buylist') - valore(b, 'buylist') || valore(a, 'credit') - valore(b, 'credit') || perNome(a, b); };
     else if (ordine === 'name_asc') cmp = perNome;
+    else if (ordine === 'name_desc') cmp = function (a, b) { return perNome(b, a); };
+    else if (ordine === 'diff_desc') cmp = perMisura(differenza, -1);
+    else if (ordine === 'diff_asc') cmp = perMisura(differenza, 1);
+    else if (ordine === 'ratio_desc') cmp = perMisura(rapporto, -1);
+    else if (ordine === 'ratio_asc') cmp = perMisura(rapporto, 1);
+    else if (ordine === 'exp_asc') cmp = function (a, b) { return String(a.expansion || '').localeCompare(String(b.expansion || ''), 'it', { sensitivity: 'base' }) || perNome(a, b); };
     else return righe;
     return copia.sort(cmp);   // sort e stabile: a parita resta l'ordine originale
   }
@@ -125,11 +152,16 @@
     function testo(nome, v) { if (v && String(v).trim()) out.push([nome, String(v).trim()]); }
     function elenco(nome, v) { if (v && v.length) out.push([nome, v.map(function (x) { return x === VUOTO ? '(vuoto)' : x; }).join(', ')]); }
     testo('Nome carta', f.name); testo('Espansione', f.expansion); testo('Numero / Serial', f.serial);
+    if (Array.isArray(f.expansions)) {
+      out.push(['Espansioni', f.expansions.length > 12 ? f.expansions.length + ' espansioni selezionate' : (f.expansions.join(', ') || '(nessuna)')]);
+    }
     elenco('Lingua', f.languages); elenco('Condizione', f.conditions); elenco('Foil', f.foils);
     elenco('1\u00aa edizione', (f.firstEditions || []).map(function (x) { return x === VUOTO ? 'No' : 'S\u00ec'; }));
     elenco('Stato offerta', f.statuses);
     if (numero(f.minCash) !== null) out.push(['Cash minimo (\u20ac)', String(numero(f.minCash)).replace('.', ',')]);
     if (numero(f.minBuono) !== null) out.push(['Buono minimo (\u20ac)', String(numero(f.minBuono)).replace('.', ',')]);
+    if (numero(f.maxCash) !== null) out.push(['Cash massimo (\u20ac)', String(numero(f.maxCash)).replace('.', ',')]);
+    if (numero(f.maxBuono) !== null) out.push(['Buono massimo (\u20ac)', String(numero(f.maxBuono)).replace('.', ',')]);
     return out;
   }
 

@@ -44,9 +44,17 @@
         <label for="name">Nome carta</label>
         <input id="name" type="text" placeholder="es. Charizard" />
       </div>
-      <div class="field">
-        <label for="expansion">Espansione</label>
-        <input id="expansion" type="text" placeholder="es. Base" />
+      <div class="field exp-field" id="expField">
+        <label for="expSearch">Espansione</label>
+        <input id="expSearch" type="text" placeholder="Tutte" autocomplete="off" aria-haspopup="listbox" aria-expanded="false" />
+        <div class="exp-panel" id="expPanel" hidden>
+          <div class="exp-actions">
+            <button type="button" class="action secondary" id="expAll">Seleziona tutte</button>
+            <button type="button" class="action secondary" id="expNone">Deseleziona tutte</button>
+            <button type="button" class="action secondary" id="expOnly" hidden>Solo queste</button>
+          </div>
+          <div class="exp-list" id="expList" role="listbox" aria-multiselectable="true"></div>
+        </div>
       </div>
       <div class="field">
         <label for="serial">Numero / Serial</label>
@@ -68,9 +76,40 @@
           <option value="cash_desc">Cash ↓</option>
           <option value="cash_asc">Cash ↑</option>
           <option value="name_asc">Nome A-Z</option>
+          <option value="name_desc">Nome Z-A</option>
           <option value="">Senza ordine</option>
+          <optgroup label="Altri ordinamenti">
+            <option value="diff_desc">Differenza Buono−Cash ↓</option>
+            <option value="diff_asc">Differenza Buono−Cash ↑</option>
+            <option value="ratio_desc">Rapporto Buono/Cash ↓</option>
+            <option value="ratio_asc">Rapporto Buono/Cash ↑</option>
+            <option value="exp_asc">Espansione A-Z</option>
+          </optgroup>
         </select>
       </div>
+      <div class="field adv-field">
+        <button type="button" class="action secondary" id="advBtn" aria-expanded="false" aria-controls="advRow">Filtri avanzati <span class="badge" id="advCount" hidden>0</span></button>
+      </div>
+    </div>
+
+    <div class="adv-row" id="advRow" hidden>
+      <div class="field">
+        <label for="maxCash">Cash max (€)</label>
+        <input id="maxCash" type="number" step="0.01" min="0" placeholder="nessun limite" />
+      </div>
+      <div class="field">
+        <label for="maxBuono">Buono max (€)</label>
+        <input id="maxBuono" type="number" step="0.01" min="0" placeholder="nessun limite" />
+      </div>
+      <fieldset class="check-group">
+        <legend>Foil</legend>
+        <div id="foilList"></div>
+      </fieldset>
+      <fieldset class="check-group">
+        <legend>1ª edizione</legend>
+        <label><input type="checkbox" name="firstEdition" value="First Edition"> Sì</label>
+        <label><input type="checkbox" name="firstEdition" value="__empty__"> No</label>
+      </fieldset>
     </div>
 
     <div class="check-columns">
@@ -85,17 +124,6 @@
       <fieldset class="check-group">
         <legend>Condizione</legend>
         <div id="condList"></div>
-      </fieldset>
-
-      <fieldset class="check-group">
-        <legend>Foil</legend>
-        <div id="foilList"></div>
-      </fieldset>
-
-      <fieldset class="check-group">
-        <legend>1ª edizione</legend>
-        <label><input type="checkbox" name="firstEdition" value="First Edition"> Sì</label>
-        <label><input type="checkbox" name="firstEdition" value="__empty__"> No</label>
       </fieldset>
 
       <fieldset class="check-group">
@@ -167,7 +195,8 @@
     function getFilters() {
       return {
         name: $('name').value.trim(),
-        expansion: $('expansion').value.trim(),
+        expansion: '',
+        expansions: espFiltro(),
         serial: $('serial').value.trim(),
         languages: checkedValues('language'),
         conditions: checkedValues('condition'),
@@ -176,9 +205,87 @@
         statuses: checkedValues('status'),
         minCash: $('minCash').value,
         minBuono: $('minBuono').value,
+        maxCash: $('maxCash').value,
+        maxBuono: $('maxBuono').value,
         sort: $('sort').value
       };
     }
+
+    /* ---------- tendina delle espansioni (scelta multipla, con ricerca scrivendo) ---------- */
+    var espList = [];   // [{n: nome, c: {gruppo: carte}}] (comprese le espansioni senza carte)
+    var espSel = {};    // nome -> true se selezionata; all'inizio sono tutte selezionate
+
+    function espConta(e) {
+      var t = 0;
+      CGCFiltri.gruppiNecessari(checkedValues('status')).forEach(function (g) { t += (e.c && e.c[g]) || 0; });
+      return t;
+    }
+    function espSelezionate() { return espList.filter(function (e) { return espSel[e.n]; }); }
+    function espFiltro() {      // null = nessun filtro (tutte); altrimenti l'elenco dei nomi scelti
+      if (!espList.length) return null;
+      var scelte = espSelezionate();
+      return scelte.length === espList.length ? null : scelte.map(function (e) { return e.n; });
+    }
+    function espVisibili() {
+      var q = CGCFiltri.norm($('expSearch').value).trim();
+      return espList.filter(function (e) { return !q || CGCFiltri.norm(e.n).indexOf(q) >= 0; });
+    }
+    function espRiassunto() {
+      var n = espSelezionate().length;
+      $('expSearch').placeholder = !espList.length ? 'Tutte' : n === espList.length ? 'Tutte (' + n + ')' :
+        n === 0 ? 'Nessuna' : n === 1 ? espSelezionate()[0].n : n + ' selezionate';
+    }
+    function espRender() {
+      var visibili = espVisibili();
+      $('expOnly').hidden = !$('expSearch').value.trim();
+      $('expList').innerHTML = visibili.length ? visibili.map(function (e) {
+        var c = espConta(e);
+        return '<label class="exp-item' + (c ? '' : ' vuota') + '" role="option"><input type="checkbox" data-n="' + escapeHtml(e.n) + '"' +
+          (espSel[e.n] ? ' checked' : '') + '> <span class="exp-name">' + escapeHtml(e.n) + '</span><span class="exp-count">' + c + '</span></label>';
+      }).join('') : '<div class="exp-vuoto">Nessuna espansione trovata</div>';
+      espRiassunto();
+    }
+    function espApri(aperta) {
+      $('expPanel').hidden = !aperta;
+      $('expSearch').setAttribute('aria-expanded', aperta ? 'true' : 'false');
+      if (!aperta && $('expSearch').value) { $('expSearch').value = ''; espRender(); }
+    }
+    function espImposta(visibili, valore, soloQueste) {
+      if (soloQueste) espList.forEach(function (e) { espSel[e.n] = false; });
+      visibili.forEach(function (e) { espSel[e.n] = valore; });
+      espRender();
+      search(true);
+    }
+    $('expSearch').addEventListener('focus', function () { espApri(true); });
+    $('expSearch').addEventListener('click', function () { espApri(true); });
+    $('expSearch').addEventListener('input', espRender);
+    $('expList').addEventListener('change', function (ev) {
+      var n = ev.target.getAttribute('data-n');
+      if (n === null) return;
+      espSel[n] = ev.target.checked;
+      espRiassunto();
+      search(true);
+    });
+    $('expAll').onclick = function () { espImposta(espVisibili(), true, false); };
+    $('expNone').onclick = function () { espImposta(espVisibili(), false, false); };
+    $('expOnly').onclick = function () { espImposta(espVisibili(), true, true); };
+    document.addEventListener('click', function (ev) { if (!$('expField').contains(ev.target)) espApri(false); });
+    document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') espApri(false); });
+
+    /* ---------- filtri avanzati (riga nascosta, con contatore) ---------- */
+    function advAggiorna() {
+      var n = ($('maxCash').value !== '' ? 1 : 0) + ($('maxBuono').value !== '' ? 1 : 0) +
+        (checkedValues('firstEdition').length ? 1 : 0) + (checkedValues('foil').length ? 1 : 0);
+      $('advCount').textContent = n;
+      $('advCount').hidden = !n;
+    }
+    $('advBtn').onclick = function () {
+      var apri = $('advRow').hidden;
+      $('advRow').hidden = !apri;
+      this.setAttribute('aria-expanded', apri ? 'true' : 'false');
+    };
+    $('advRow').addEventListener('input', advAggiorna);
+    $('advRow').addEventListener('change', advAggiorna);
 
     function escapeHtml(str) {
       return String(str)
@@ -228,6 +335,9 @@
       $('foilList').innerHTML = CGCFiltri.opzioniFoil(valoriFiltri('foil')).map(function (o) { return casella('foil', o); }).join('');
       document.querySelectorAll('.filters input[type="checkbox"]').forEach(function (el) {
         el.addEventListener('change', function () { search(true); });
+      });
+      document.querySelectorAll('input[name="status"]').forEach(function (el) {
+        el.addEventListener('change', espRender);   // i numeri accanto alle espansioni seguono lo stato scelto
       });
     }
 
@@ -411,6 +521,9 @@
       }
       mostraMeta();
       costruisciFiltri();
+      espList = (meta && meta.espansioni) || [];
+      espList.forEach(function (e) { espSel[e.n] = true; });
+      espRender();
       search(true);
     })();
   </script>

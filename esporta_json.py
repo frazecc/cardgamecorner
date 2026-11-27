@@ -95,7 +95,7 @@ def dump(path, data):
         json.dump(data, stream, ensure_ascii=False, separators=(',', ':'))
 
 
-def write_site(groups, rows, checked, docs_dir, out_dir, now=None):
+def write_site(groups, rows, checked, docs_dir, out_dir, now=None, searches=None):
     """Copia docs/ in out_dir e scrive data/*.json. checked = {'dal': ..., 'fino_al': ...} oppure None."""
     docs_dir, out_dir = Path(docs_dir), Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -111,6 +111,14 @@ def write_site(groups, rows, checked, docs_dir, out_dir, now=None):
             for n in GROUP_NAMES}},
         'valori_filtri': {n: filter_values(groups[n]) for n in GROUP_NAMES},
     }
+    # Elenco delle espansioni per la tendina del sito: quelle con carte + tutte le ricerche note (anche vuote).
+    counts = {}
+    for name in GROUP_NAMES:
+        for card in groups[name]['carte']:
+            per_group = counts.setdefault(card.get('e') or '', {})
+            per_group[name] = per_group.get(name, 0) + 1
+    names = {n for n in counts if n} | {str(s) for s in (searches or []) if s}
+    meta['espansioni'] = [{'n': n, 'c': counts.get(n, {})} for n in sorted(names, key=str.casefold)]
     if checked and checked.get('dal') and checked.get('fino_al'):
         meta['dati_controllati_dal'] = checked['dal']
         meta['dati_controllati_fino_al'] = checked['fino_al']
@@ -195,6 +203,17 @@ def fetch_checked_range(client):
     return None
 
 
+def fetch_searches(client):
+    """Nomi di tutte le espansioni cercate dallo scanner, anche quelle senza carte (facoltativo)."""
+    try:
+        rows = _get(client, 'cgc_stato_ricerche', {'select': 'ricerca,id_ricerca', 'id_ricerca': 'neq.__generale__',
+                                                    'limit': '2000'})
+        return [r['ricerca'] for r in rows or [] if r.get('ricerca')]
+    except Exception as err:
+        print('Elenco espansioni vuote non disponibile (%s): uso solo quelle con carte.' % err, flush=True)
+        return []
+
+
 def main(argv=None):
     root = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -214,7 +233,7 @@ def main(argv=None):
     if len(rows) < args.min_righe:
         sys.exit('Troppe poche righe (%d, minimo %d): non pubblico nulla per non svuotare il sito.' % (len(rows), args.min_righe))
     groups = build_groups(rows)
-    meta = write_site(groups, rows, fetch_checked_range(client), args.docs, args.out)
+    meta = write_site(groups, rows, fetch_checked_range(client), args.docs, args.out, searches=fetch_searches(client))
     for name in GROUP_NAMES:
         size = Path(args.out, 'data', name + '.json').stat().st_size
         print('  %-13s %7d carte, %7d righe, %6.2f MB' % (

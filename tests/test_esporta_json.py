@@ -50,6 +50,13 @@ class EsportaJsonTests(unittest.TestCase):
             self.assertEqual(saved['valori_filtri']['prezzi']['language'], [['English', 1], ['Italiano', 1]])
             self.assertEqual(saved['dati_controllati_dal'], '2026-11-01T00:00:00Z')
 
+    def test_expansion_list_includes_empty_searches(self):
+        rows = [row(1), row(2, card='C2')]
+        groups = esporta_json.build_groups(rows)
+        with tempfile.TemporaryDirectory() as tmp:
+            meta = esporta_json.write_site(groups, rows, None, ROOT / 'docs', tmp, searches=['Base', 'Vuota', ''])
+        self.assertEqual(meta['espansioni'], [{'n': 'Base', 'c': {'prezzi': 2}}, {'n': 'Vuota', 'c': {}}])
+
 
 if __name__ == '__main__':
     unittest.main()

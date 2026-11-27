@@ -58,7 +58,7 @@ class PageTests(unittest.TestCase):
         rows += [row(500, 'Zubat Richiesta', status='VALUTAZIONE SU RICHIESTA', buylist=None, credit=None),
                  row(501, 'Abra Senza Prezzo', status='SENZA PREZZO BUYLIST', buylist='0', credit='0')]
         groups = esporta_json.build_groups(rows)
-        esporta_json.write_site(groups, rows, None, ROOT / 'docs', Path(cls.tmp.name, 'sito'))
+        esporta_json.write_site(groups, rows, None, ROOT / 'docs', Path(cls.tmp.name, 'sito'), searches=['Base', 'Espansione Vuota'])
         handler = functools.partial(QuietHandler, directory=str(Path(cls.tmp.name, 'sito')))
         cls.server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler)
         threading.Thread(target=cls.server.serve_forever, daemon=True).start()
@@ -122,6 +122,35 @@ class PageTests(unittest.TestCase):
         self.wait_info(page, 'Risultati 1\u201350 di 121')
         self.assertIn('richiesta.json', requested)
         self.assertNotIn('senza-prezzo.json', requested)
+
+    def test_advanced_filters_are_hidden_and_counted(self):
+        page = self.open_page()
+        self.assertFalse(page.is_visible('#maxCash'))
+        self.assertFalse(page.is_visible('#advCount'))
+        page.click('#advBtn')
+        self.assertTrue(page.is_visible('#maxCash'))
+        page.fill('#maxCash', '2')
+        page.check('input[name=foil][value=\"Reverse Holo\"]')
+        page.wait_for_function("document.getElementById('advCount').textContent === '2'")
+        page.click('#advBtn')   # chiusa: i filtri restano attivi e il contatore resta visibile
+        self.assertTrue(page.is_visible('#advCount'))
+        self.wait_info(page, 'Risultati 1\u20131 di 1')   # unica carta Reverse Holo con Cash fino a 2 €
+
+    def test_expansion_dropdown_selects_many_and_counts_empty_ones(self):
+        page = self.open_page()
+        self.assertEqual(page.get_attribute('#expSearch', 'placeholder'), 'Tutte (2)')
+        page.click('#expSearch')
+        self.assertEqual(page.locator('#expList .exp-item').count(), 2)
+        self.assertEqual(page.locator('#expList .exp-item.vuota').count(), 1)   # l'espansione senza carte si vede
+        page.click('#expNone')
+        self.wait_info(page, 'Nessun risultato')
+        page.fill('#expSearch', 'vuota')
+        self.assertEqual(page.locator('#expList .exp-item').count(), 1)
+        page.click('#expAll')                      # agisce solo sulle voci mostrate
+        self.wait_info(page, 'Nessun risultato')   # le carte stanno in 'Base', ancora deselezionata
+        page.fill('#expSearch', '')
+        page.click('#expAll')
+        self.wait_info(page, 'Risultati 1\u201350 di 120')
 
     def test_pagination_and_page_size(self):
         page = self.open_page()

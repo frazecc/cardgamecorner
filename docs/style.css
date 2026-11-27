@@ -97,7 +97,7 @@ body {
 
 .field-row {
   display: grid;
-  grid-template-columns: 1.4fr 1.2fr 1fr 0.85fr 0.85fr 1fr;
+  grid-template-columns: 1.4fr 1.2fr 1fr 0.85fr 0.85fr 1fr auto;
   gap: 0.5rem 0.65rem;
   align-items: end;
 }
@@ -129,7 +129,7 @@ body {
 
 .check-columns {
   display: grid;
-  grid-template-columns: 1.6fr 0.7fr 0.7fr 0.7fr 1fr;
+  grid-template-columns: 1.6fr 0.7fr 1fr;
   gap: 0.5rem;
 }
 
@@ -255,6 +255,39 @@ th {
 .status.warn { background: var(--warn-bg); color: var(--warn-fg); }
 .status.bad { background: var(--bad-bg); color: var(--bad-fg); }
 
+/* tendina espansioni */
+.exp-field { position: relative; }
+.exp-panel {
+  position: absolute; z-index: 30; top: 100%; left: 0; margin-top: 4px;
+  width: max(100%, 340px); padding: 0.5rem;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow);
+}
+.exp-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.4rem; }
+.exp-actions .action { padding: 0.25rem 0.5rem; font-size: 0.78rem; }
+.exp-list { max-height: 280px; overflow-y: auto; }
+.exp-item { display: flex; align-items: center; gap: 0.45rem; padding: 0.3rem 0.35rem; border-radius: 6px; cursor: pointer; font-size: 0.86rem; }
+.exp-item:hover { background: var(--th); }
+.exp-item.vuota { opacity: 0.55; }
+.exp-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.exp-count { color: var(--muted); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+.exp-vuoto { padding: 0.6rem; color: var(--muted); font-size: 0.85rem; }
+
+/* filtri avanzati */
+.adv-field { justify-content: flex-end; }
+.adv-field .action { white-space: nowrap; }
+.adv-row {
+  display: flex; flex-wrap: wrap; gap: 0.5rem 0.65rem; align-items: end;
+  margin: 0.5rem 0; padding: 0.55rem 0.65rem;
+  background: var(--card); border: 1px dashed var(--border); border-radius: 8px;
+}
+.adv-row[hidden], .exp-panel[hidden] { display: none; }
+.adv-row .field { width: 9rem; }
+.badge {
+  display: inline-block; min-width: 1.2rem; padding: 0 0.35rem; margin-left: 0.2rem;
+  border-radius: 999px; background: var(--primary); color: #fff; font-size: 0.72rem; line-height: 1.25rem; text-align: center;
+}
+.badge[hidden] { display: none; }
+
 @media (max-width: 1000px) {
   .field-row {
     grid-template-columns: repeat(3, 1fr);
@@ -267,6 +300,12 @@ th {
   .field-row {
     grid-template-columns: 1fr 1fr;
   }
+  .exp-panel {
+    position: fixed; left: 0; right: 0; bottom: 0; top: auto; margin: 0; width: auto;
+    max-height: 75vh; border-radius: 14px 14px 0 0; padding-bottom: 1rem;
+  }
+  .exp-list { max-height: 50vh; }
+  .exp-item { padding: 0.55rem 0.4rem; }
   .check-columns {
     grid-template-columns: 1fr;
   }
