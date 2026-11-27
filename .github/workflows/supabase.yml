@@ -75,11 +75,17 @@ jobs:
           PUBLISH_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_only }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
         run: |
-          if [[ "$PUBLISH_ONLY" == 'true' ]]; then
-            python -u supabase_sync.py --source-run-id "$SOURCE_RUN_ID" 2>&1 | tee supabase.log
-          else
-            python -u supabase_sync.py 2>&1 | tee supabase.log
-          fi
+          set -o pipefail
+          # Fino a 3 tentativi sullo stesso checkpoint (l'import e idempotente): niente interventi manuali
+          # se Supabase e lento o momentaneamente irraggiungibile.
+          ARGS=()
+          if [[ "$PUBLISH_ONLY" == 'true' ]]; then ARGS=(--source-run-id "$SOURCE_RUN_ID"); fi
+          for attempt in 1 2 3; do
+            if python -u supabase_sync.py "${ARGS[@]}" 2>&1 | tee -a supabase.log; then exit 0; fi
+            echo "Tentativo $attempt di 3 non riuscito."
+            if [[ "$attempt" -lt 3 ]]; then sleep 180; fi
+          done
+          exit 1
       - name: Conserva checkpoint e risultati
         if: always()
         uses: actions/upload-artifact@v4

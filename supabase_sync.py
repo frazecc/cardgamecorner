@@ -56,6 +56,10 @@ def load_source(path):
     return source, prices
 
 
+class SupabaseUnavailable(RuntimeError):
+    """Supabase non ha risposto (timeout o errore del server): l'operazione potrebbe essere comunque in corso."""
+
+
 class SupabaseClient:
     def __init__(self, url, secret, session=None):
         parsed = urlparse(url)
@@ -72,8 +76,22 @@ class SupabaseClient:
         if not secret.startswith('sb_secret_'):
             self.headers['Authorization'] = 'Bearer ' + secret
 
-    def rpc(self, name, body):
-        for attempt in range(6):
+    def _detail(self, response):
+        """Codice e messaggio dell'errore del server (solo per gli errori temporanei), senza mai mostrare la chiave."""
+        text = 'HTTP %s' % response.status_code
+        try:
+            data = response.json()
+            if isinstance(data, dict):
+                extra = ' '.join(str(data.get(k)) for k in ('code', 'message') if isinstance(data.get(k), str))
+                if extra:
+                    text += ': ' + extra
+        except Exception:
+            pass
+        return text.replace(self.headers.get('apikey', '\0'), '***')[:200]
+
+    def rpc(self, name, body, tries=6):
+        detail = ''
+        for attempt in range(tries):
             try:
                 response = self.session.post(self.url + '/rest/v1/rpc/' + name,
                     headers=self.headers, json=body, timeout=120)
@@ -82,12 +100,34 @@ class SupabaseClient:
                 retry = response.status_code in (429, 500, 502, 503, 504)
                 if not retry:
                     raise RuntimeError(f'Supabase HTTP {response.status_code} in {name}; dati non pubblicati.')
-            except requests.RequestException:
-                if attempt == 5:
-                    raise RuntimeError('Supabase non raggiungibile dopo i tentativi previsti.') from None
-            if attempt == 5:
-                raise RuntimeError('Supabase temporaneamente indisponibile; riprova lo stesso checkpoint.')
+                detail = self._detail(response)
+            except requests.RequestException as error:
+                detail = type(error).__name__
+                if attempt == tries - 1:
+                    raise SupabaseUnavailable(f'Supabase non raggiungibile in {name} ({detail}).') from None
+            if attempt == tries - 1:
+                raise SupabaseUnavailable(f'Supabase temporaneamente indisponibile in {name} ({detail}).')
             time.sleep(min(2 ** attempt, 20))
+
+
+def complete(client, import_id, wait=3600, clock=time.monotonic, sleep=time.sleep):
+    """Conferma finale dell'import.
+
+    cgc_delta_complete scrive tutto in una sola transazione e puo durare molti minuti. Se la risposta HTTP non
+    arriva, il database di solito continua a lavorare: rinunciare subito lasciava l'import "fallito" anche se poi
+    finiva. Qui si riprova a intervalli: una chiamata ripetuta aspetta la transazione in corso e poi riceve
+    COMPLETE (il job e idempotente); se la transazione e fallita, riparte da capo.
+    """
+    deadline = clock() + wait
+    while True:
+        try:
+            return client.rpc('cgc_delta_complete', {'p_id': import_id}, tries=1)
+        except SupabaseUnavailable as error:
+            print(f'Conferma finale lenta o senza risposta ({error}): ricontrollo tra 30 secondi.', flush=True)
+            if clock() > deadline:
+                raise RuntimeError(f'La conferma finale non risulta completata dopo {int(wait / 60)} minuti '
+                                   f'(ultimo errore: {error}). Il checkpoint resta valido: rilancia lo stesso import.') from error
+            sleep(30)
 
 
 def sync(path, source_run_id='', batch_size=100, client=None):
@@ -109,7 +149,7 @@ def sync(path, source_run_id='', batch_size=100, client=None):
                 raise RuntimeError('Numero di carte confermate diverso dal blocco inviato.')
             confirmed += n
             print(f'Supabase: {confirmed}/{len(source["records"])} carte confermate.', flush=True)
-    result = client.rpc('cgc_delta_complete', {'p_id': import_id})
+    result = complete(client, import_id)
     if not isinstance(result, dict) or result.get('cards') != len(source['records']) or result.get('prices') != price_count or result.get('state') != 'COMPLETE':
         raise RuntimeError('Conferma finale Supabase non valida.')
     print(f'SUPABASE COMPLETO: {result["cards"]} carte, {result["prices"]} voci prezzo.', flush=True)

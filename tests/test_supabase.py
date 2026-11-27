@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from supabase_sync import SupabaseClient, prepare_card, batches, load_source, sync
+from supabase_sync import SupabaseClient, SupabaseUnavailable, complete, prepare_card, batches, load_source, sync
 from scraper import parse_variants, price_rows, product_key
 
 
@@ -93,6 +93,40 @@ class SupabaseTests(unittest.TestCase):
                 sync(path, client=client)
         self.assertEqual([x.args[0] for x in client.rpc.call_args_list],
                          ['cgc_delta_open', 'cgc_delta_complete'])
+
+    def test_final_confirmation_waits_instead_of_giving_up(self):
+        client = Mock()
+        client.rpc.side_effect = [SupabaseUnavailable('timeout'), SupabaseUnavailable('HTTP 504'),
+                                  {'state': 'COMPLETE', 'cards': 1, 'prices': 2}]
+        sleeps = []
+        result = complete(client, 'cgc-x', sleep=sleeps.append)
+        self.assertEqual(result['state'], 'COMPLETE')
+        self.assertEqual(sleeps, [30, 30])
+        self.assertEqual(client.rpc.call_args_list[0].args, ('cgc_delta_complete', {'p_id': 'cgc-x'}))
+
+    def test_final_confirmation_stops_after_the_time_limit(self):
+        client = Mock()
+        client.rpc.side_effect = SupabaseUnavailable('timeout')
+        ticks = iter(range(0, 100000, 1000))
+        with self.assertRaisesRegex(RuntimeError, 'non risulta completata'):
+            complete(client, 'cgc-x', wait=3000, clock=lambda: next(ticks), sleep=lambda s: None)
+
+    def test_real_errors_are_not_retried_by_the_final_confirmation(self):
+        client = Mock()
+        client.rpc.side_effect = RuntimeError('Supabase HTTP 400 in cgc_delta_complete; dati non pubblicati.')
+        with self.assertRaisesRegex(RuntimeError, 'HTTP 400'):
+            complete(client, 'cgc-x', sleep=lambda s: None)
+        self.assertEqual(client.rpc.call_count, 1)
+
+    def test_server_error_details_are_reported_without_the_key(self):
+        session = Mock()
+        session.post.return_value = Mock(ok=False, status_code=500, json=lambda: {
+            'code': '57014', 'message': 'canceling statement due to statement timeout sb_secret_sensitive'})
+        client = SupabaseClient('https://x.supabase.co', 'sb_secret_sensitive', session)
+        with self.assertRaises(SupabaseUnavailable) as ctx:
+            client.rpc('cgc_delta_complete', {}, tries=1)
+        self.assertIn('57014', str(ctx.exception))
+        self.assertNotIn('sensitive', str(ctx.exception))
 
     def test_incomplete_ack_never_publishes_new_prices(self):
         source = {'records': {'x': self.row}, 'queries': [{'id': None}]}
