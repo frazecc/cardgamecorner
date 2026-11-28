@@ -1,0 +1,48 @@
+name: Backup del database
+
+# Ogni notte salva carte e prezzi in un file compresso tra gli artefatti del workflow.
+# GitHub cancella da solo gli artefatti dopo 3 giorni: restano al massimo le ultime copie.
+# L'orario e in UTC: 23:00 UTC = mezzanotte in Italia d'inverno (l'una d'estate).
+# Se il backup fallisce, GitHub ti scrive una email.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 23 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backup-database
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Installa dipendenze
+        run: python -m pip install requests
+      - name: Verifica configurazione
+        run: |
+          if [[ -z "$SUPABASE_URL" || -z "$SUPABASE_SERVICE_ROLE_KEY" ]]; then
+            echo 'Mancano la variabile SUPABASE_URL o il secret SUPABASE_SERVICE_ROLE_KEY.'
+            exit 1
+          fi
+      - name: Crea il backup
+        run: python -u backup_db.py --out backup
+      - name: Conserva il backup (3 giorni)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Backup-database-${{ github.run_number }}
+          path: backup/
+          retention-days: 3
+          if-no-files-found: error
