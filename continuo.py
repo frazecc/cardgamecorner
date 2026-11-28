@@ -22,7 +22,8 @@ GENERAL = {'id': None, 'name': 'Ricerca generale'}
 MAX_CONSECUTIVE_FAILURES = 6
 # Protezioni contro un sito che smette di rispondere (visto il 25/11/2026: centinaia di ricerche
 # "vuote" e catalogo svuotato dalla pulizia): sessione rinnovata ogni 30 minuti, ricerche vuote
-# ricontrollate con una sessione nuova e con una ricerca di controllo, stop se vengono tolte troppe carte.
+# ricontrollate con una sessione nuova e con una ricerca di controllo; le rimozioni confermate si applicano
+# sempre, ma se sono molte il run finisce con un avviso (email di GitHub).
 REFRESH_SECONDS = 1800
 MAX_REMOVED_PER_RUN = 500
 CANARY_NAMES = ('Southern Islands', 'Jungle', 'Base', 'Fossil')
@@ -33,7 +34,7 @@ class SiteSilent(RuntimeError):
 
 
 class TooManyRemoved(RuntimeError):
-    """In un solo run sono state tolte troppe carte: serve un controllo manuale."""
+    """In un solo run sono state tolte molte carte: avviso a fine run, i dati sono gia aggiornati."""
 
 # Stesso criterio di scraper.py: Angular puo codificare lo stesso ID come
 # number:123, string:123 o valore semplice. Si usa il valore reale dell'opzione.
@@ -303,11 +304,14 @@ def work(client, site, run_id, max_runtime, grace=900, max_queries=None, pause=3
             # Sessione nuova dopo un errore: lo stato della pagina non e piu affidabile.
             reopen()
         removed_total += removed
-        if max_removed and removed_total > max_removed:
-            raise TooManyRemoved(f'In questo run sono state tolte {removed_total} carte (limite {max_removed}): '
-                                 'mi fermo per un controllo manuale.')
         sleep(pause)
     print(f'Fine del run: {completed} ricerche completate.', flush=True)
+    if max_removed and removed_total > max_removed:
+        # Il lavoro e gia stato fatto (il database rispecchia il sito): il run termina "rosso" solo per avvisare,
+        # perche GitHub scrive una email quando un workflow fallisce.
+        raise TooManyRemoved(f'AVVISO: in questo run sono state tolte {removed_total} carte (soglia {max_removed}). '
+                             'I dati sono stati aggiornati come richiesto: controlla che il sito sorgente abbia davvero '
+                             'rimosso queste carte.')
     return completed
 
 

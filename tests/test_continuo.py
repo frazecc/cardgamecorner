@@ -333,7 +333,7 @@ class EmptyResponseProtectionTests(unittest.TestCase):
         self.assertNotIn('cgc_live_finish', client.names())
         self.assertNotIn('cgc_live_clean', client.names())
 
-    def test_run_stops_when_too_many_cards_are_removed(self):
+    def test_removals_are_applied_and_a_large_one_is_reported_at_the_end(self):
         client = FakeClient([claim('7', 'Base'), claim('8', 'Jungle'), claim('7', 'Base')])
         original = client.rpc
 
@@ -346,7 +346,7 @@ class EmptyResponseProtectionTests(unittest.TestCase):
         client.rpc = rpc
         with self.assertRaises(continuo.TooManyRemoved):
             self.run_work(client, lambda *a: (1, 1), max_queries=3, max_removed=500)
-        self.assertEqual(client.names().count('cgc_live_finish'), 2)
+        self.assertEqual(client.names().count('cgc_live_finish'), 3)   # il lavoro viene completato comunque
 
     def test_browser_session_is_renewed_periodically(self):
         client = FakeClient([claim('7', 'Base'), claim('8', 'Jungle'), claim('7', 'Base')])
